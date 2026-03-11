@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from jirareport.domain.models import DateRange, WorklogEntry
+from jirareport.domain.models import DateRange, SpreadsheetPublishRequest, WorklogEntry
 
 
 class WorklogSource(Protocol):
@@ -17,3 +17,10 @@ class ReportStorage(Protocol):
 
     def write_json(self, path: str, payload: dict[str, Any]) -> str:
         """Writes JSON payload and returns the storage path."""
+
+
+class SpreadsheetPublisher(Protocol):
+    """Publishes tabular report data to a spreadsheet backend."""
+
+    def publish(self, request: SpreadsheetPublishRequest) -> str:
+        """Publishes a yearly spreadsheet payload and returns its URL."""

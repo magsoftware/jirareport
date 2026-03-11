@@ -31,11 +31,28 @@ class StorageSettings:
 
 
 @dataclass(frozen=True)
+class SheetsSettings:
+    """Holds configuration for yearly Google Sheets publishing."""
+
+    enabled: bool
+    spreadsheet_ids: dict[int, str]
+
+    def spreadsheet_id_for_year(self, year: int) -> str:
+        """Returns the configured spreadsheet ID for the requested year."""
+        try:
+            return self.spreadsheet_ids[year]
+        except KeyError as exc:
+            message = f"Missing Google Sheets spreadsheet ID for year {year}."
+            raise ValueError(message) from exc
+
+
+@dataclass(frozen=True)
 class AppSettings:
     """Represents the full application configuration."""
 
     jira: JiraSettings
     storage: StorageSettings
+    sheets: SheetsSettings
     timezone_name: str
 
 
@@ -55,8 +72,18 @@ def load_settings() -> AppSettings:
         bucket_name=_bucket_name_for_backend(backend),
         bucket_prefix=os.getenv("GCS_BUCKET_PREFIX", "jirareport"),
     )
+    sheet_ids = _sheet_ids_from_env()
+    sheets = SheetsSettings(
+        enabled=_sheets_enabled_from_env(sheet_ids),
+        spreadsheet_ids=sheet_ids,
+    )
     timezone_name = os.getenv("REPORT_TIMEZONE", "Europe/Warsaw")
-    return AppSettings(jira=jira, storage=storage, timezone_name=timezone_name)
+    return AppSettings(
+        jira=jira,
+        storage=storage,
+        sheets=sheets,
+        timezone_name=timezone_name,
+    )
 
 
 def _required_env(name: str) -> str:
@@ -87,3 +114,29 @@ def _bucket_name_for_backend(backend: StorageBackend) -> str | None:
     if backend == "local":
         return os.getenv("GCS_BUCKET_NAME")
     return _required_env("GCS_BUCKET_NAME")
+
+
+def _sheet_ids_from_env() -> dict[int, str]:
+    """Loads configured yearly spreadsheet IDs from environment variables."""
+    result: dict[int, str] = {}
+    prefix = "GOOGLE_SHEETS_ID_"
+    for name, value in os.environ.items():
+        if not name.startswith(prefix) or not value:
+            continue
+        year = int(name.removeprefix(prefix))
+        result[year] = value
+    return result
+
+
+def _sheets_enabled_from_env(sheet_ids: dict[int, str]) -> bool:
+    """Determines whether Google Sheets publishing is enabled."""
+    raw_value = os.getenv("GOOGLE_SHEETS_ENABLED")
+    if raw_value in {None, ""}:
+        return bool(sheet_ids)
+    assert raw_value is not None
+    normalized = raw_value.lower().strip()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Unsupported GOOGLE_SHEETS_ENABLED value: {raw_value}")

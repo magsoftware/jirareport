@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 
+type SheetCellValue = str | int | float | bool
+
 
 @dataclass(frozen=True, order=True)
 class MonthId:
@@ -168,3 +170,20 @@ class MonthlyWorklogReport:
     generated_at: datetime
     timezone_name: str
     tickets: tuple[TicketWorklogReport, ...]
+
+
+@dataclass(frozen=True)
+class WorksheetData:
+    """Represents one tab payload to be written to a spreadsheet."""
+
+    title: str
+    rows: tuple[tuple[SheetCellValue, ...], ...]
+
+
+@dataclass(frozen=True)
+class SpreadsheetPublishRequest:
+    """Represents the full yearly spreadsheet payload for one sync run."""
+
+    year: int
+    spreadsheet_id: str
+    worksheets: tuple[WorksheetData, ...]

@@ -11,6 +11,7 @@ from jirareport.domain.models import MonthId
 from jirareport.infrastructure.config import (
     AppSettings,
     JiraSettings,
+    SheetsSettings,
     StorageSettings,
 )
 from jirareport.infrastructure.jira_client import JiraWorklogSource
@@ -25,6 +26,11 @@ class DailyResult:
 @dataclass(frozen=True)
 class MonthlyResult:
     report_path: str
+
+
+@dataclass(frozen=True)
+class SyncSheetsResult:
+    spreadsheet_urls: tuple[str, ...]
 
 
 @dataclass
@@ -53,6 +59,23 @@ class FakeMonthlyService:
     def generate(self, month: MonthId) -> MonthlyResult:
         self.last_month = month
         return MonthlyResult(report_path="derived/monthly.json")
+
+
+@dataclass
+class FakeSheetsSyncService:
+    source: object
+    publisher: object
+    project_key: str
+    spreadsheet_ids: dict[int, str]
+    timezone_name: str
+
+    last_date: date | None = None
+
+    def generate(self, reference_date: date) -> SyncSheetsResult:
+        self.last_date = reference_date
+        return SyncSheetsResult(
+            spreadsheet_urls=("https://docs.google.com/spreadsheets/d/sheet/edit",)
+        )
 
 
 def test_main_dispatches_daily_command(
@@ -94,6 +117,33 @@ def test_main_dispatches_monthly_command(
     assert fake_monthly.last_month.label() == "2026-03"
 
 
+def test_main_dispatches_sync_sheets_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings()
+    fake_sync = FakeSheetsSyncService(
+        None,
+        None,
+        "PRJ",
+        {2026: "sheet"},
+        "Europe/Warsaw",
+    )
+    monkeypatch.setattr(app, "load_settings", lambda: settings)
+    monkeypatch.setattr(app, "configure_logging", lambda debug: None)
+    monkeypatch.setattr(app, "_build_source", lambda settings: object())
+    monkeypatch.setattr(app, "_build_spreadsheet_publisher", lambda settings: object())
+    monkeypatch.setattr(
+        app,
+        "SheetsSyncService",
+        lambda *args, **kwargs: fake_sync,
+    )
+
+    result = app.main(["sync", "sheets", "--date", "2026-03-11"])
+
+    assert result == 0
+    assert str(fake_sync.last_date) == "2026-03-11"
+
+
 def test_build_source_uses_jira_settings() -> None:
     source = app._build_source(_settings())
 
@@ -115,5 +165,6 @@ def _settings() -> AppSettings:
             bucket_name=None,
             bucket_prefix="jirareport",
         ),
+        sheets=SheetsSettings(enabled=True, spreadsheet_ids={2026: "sheet-2026"}),
         timezone_name="Europe/Warsaw",
     )

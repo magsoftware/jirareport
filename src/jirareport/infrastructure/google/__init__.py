@@ -1,0 +1,1 @@
+"""Google-specific infrastructure adapters."""

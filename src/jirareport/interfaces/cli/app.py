@@ -6,11 +6,16 @@ from datetime import date
 
 from loguru import logger
 
-from jirareport.application.services import DailySnapshotService, MonthlyReportService
+from jirareport.application.services import (
+    DailySnapshotService,
+    MonthlyReportService,
+    SheetsSyncService,
+)
 from jirareport.domain.models import MonthId
-from jirareport.domain.ports import ReportStorage, WorklogSource
+from jirareport.domain.ports import ReportStorage, SpreadsheetPublisher, WorklogSource
 from jirareport.domain.time_range import current_date
 from jirareport.infrastructure.config import AppSettings, load_settings
+from jirareport.infrastructure.google.sheets_client import GoogleSheetsPublisher
 from jirareport.infrastructure.jira_client import JiraWorklogSource
 from jirareport.infrastructure.logging_config import configure_logging
 from jirareport.infrastructure.storage import build_storage
@@ -22,16 +27,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     configure_logging(args.debug)
     settings = load_settings()
-    source = _build_source(settings)
-    storage = build_storage(
-        settings.storage.backend,
-        settings.storage.local_output_dir,
-        settings.storage.bucket_name,
-        settings.storage.bucket_prefix,
-    )
     if args.command == "daily":
+        source = _build_source(settings)
+        storage = _build_storage(settings)
         return _run_daily(args.date, settings, source, storage)
-    return _run_monthly(args.month, settings, source, storage)
+    if args.command == "monthly":
+        source = _build_source(settings)
+        storage = _build_storage(settings)
+        return _run_monthly(args.month, settings, source, storage)
+    source = _build_source(settings)
+    publisher = _build_spreadsheet_publisher(settings)
+    return _run_sync_sheets(args.date, settings, source, publisher)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -47,7 +53,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "  jirareport daily\n"
             "  jirareport daily --date 2026-03-11\n"
             "  jirareport monthly\n"
-            "  jirareport monthly --month 2026-03"
+            "  jirareport monthly --month 2026-03\n"
+            "  jirareport sync sheets\n"
+            "  jirareport sync sheets --date 2026-03-11"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -60,7 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="command",
         required=True,
         title="commands",
-        metavar="{daily,monthly}",
+        metavar="{daily,monthly,sync}",
     )
     daily = subparsers.add_parser(
         "daily",
@@ -94,6 +102,32 @@ def _build_parser() -> argparse.ArgumentParser:
             "Defaults to the current month in REPORT_TIMEZONE."
         ),
     )
+    sync = subparsers.add_parser(
+        "sync",
+        help="Synchronize reporting data to external publishing targets.",
+    )
+    sync_subparsers = sync.add_subparsers(
+        dest="sync_target",
+        required=True,
+        title="targets",
+        metavar="{sheets}",
+    )
+    sheets = sync_subparsers.add_parser(
+        "sheets",
+        help="Publish the current daily reporting snapshot to Google Sheets.",
+        description=(
+            "Build the current rolling daily snapshot in memory and publish it "
+            "to the configured yearly Google Sheets workbook(s)."
+        ),
+    )
+    sheets.add_argument(
+        "--date",
+        type=str,
+        help=(
+            "Reference date in YYYY-MM-DD format. "
+            "Defaults to the current date in REPORT_TIMEZONE."
+        ),
+    )
     return parser
 
 
@@ -107,6 +141,23 @@ def _build_source(settings: AppSettings) -> WorklogSource:
         project_key=jira.project_key,
         timezone_name=settings.timezone_name,
     )
+
+
+def _build_storage(settings: AppSettings) -> ReportStorage:
+    """Builds the configured report storage adapter."""
+    return build_storage(
+        settings.storage.backend,
+        settings.storage.local_output_dir,
+        settings.storage.bucket_name,
+        settings.storage.bucket_prefix,
+    )
+
+
+def _build_spreadsheet_publisher(settings: AppSettings) -> SpreadsheetPublisher:
+    """Builds the configured Google Sheets publisher adapter."""
+    if not settings.sheets.enabled:
+        raise ValueError("Google Sheets publishing is disabled.")
+    return GoogleSheetsPublisher()
 
 
 def _run_daily(
@@ -155,4 +206,30 @@ def _run_monthly(
     )
     result = service.generate(month)
     logger.info("Monthly report saved to {}", result.report_path)
+    return 0
+
+
+def _run_sync_sheets(
+    input_date: str | None,
+    settings: AppSettings,
+    source: WorklogSource,
+    publisher: SpreadsheetPublisher,
+) -> int:
+    """Runs the Google Sheets synchronization use case."""
+    if input_date:
+        reference_date = date.fromisoformat(input_date)
+    else:
+        reference_date = current_date(settings.timezone_name)
+    service = SheetsSyncService(
+        source=source,
+        publisher=publisher,
+        project_key=settings.jira.project_key,
+        spreadsheet_ids=settings.sheets.spreadsheet_ids,
+        timezone_name=settings.timezone_name,
+    )
+    result = service.generate(reference_date)
+    logger.info(
+        "Published Google Sheets sync to {}",
+        ", ".join(result.spreadsheet_urls),
+    )
     return 0

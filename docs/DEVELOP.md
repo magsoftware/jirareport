@@ -25,7 +25,8 @@ Aktualnie system umie:
 - zapisywac wynik lokalnie albo do Google Cloud Storage,
 - logowac przebieg przez `loguru`.
 
-Docelowo projekt ma publikowac dane rowniez do Google Sheets, ale ten adapter nie jest jeszcze zaimplementowany.
+Projekt publikuje dane rowniez do Google Sheets przez osobny use case i komende
+CLI `sync sheets`.
 
 ## 3. Architektura wysokiego poziomu
 

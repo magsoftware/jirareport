@@ -10,6 +10,10 @@ from jirareport.application.serializers import (
     serialize_daily_snapshot,
     serialize_monthly_report,
 )
+from jirareport.application.spreadsheets import (
+    build_spreadsheet_request,
+    years_for_snapshot,
+)
 from jirareport.domain.models import (
     DailyRawSnapshot,
     DateRange,
@@ -18,7 +22,7 @@ from jirareport.domain.models import (
     TicketWorklogReport,
     WorklogEntry,
 )
-from jirareport.domain.ports import ReportStorage, WorklogSource
+from jirareport.domain.ports import ReportStorage, SpreadsheetPublisher, WorklogSource
 from jirareport.domain.time_range import month_range, months_in_range, rolling_window
 
 
@@ -37,6 +41,14 @@ class MonthlyReportResult:
 
     report_path: str
     ticket_count: int
+    worklog_count: int
+
+
+@dataclass(frozen=True)
+class SpreadsheetSyncResult:
+    """Describes the output of the Google Sheets synchronization use case."""
+
+    spreadsheet_urls: tuple[str, ...]
     worklog_count: int
 
 
@@ -152,6 +164,55 @@ class MonthlyReportService:
         return MonthlyReportResult(report_path, ticket_count, len(worklogs))
 
 
+class SheetsSyncService:
+    """Publishes the current daily reporting snapshot to yearly spreadsheets."""
+
+    def __init__(
+        self,
+        source: WorklogSource,
+        publisher: SpreadsheetPublisher,
+        project_key: str,
+        spreadsheet_ids: dict[int, str],
+        timezone_name: str,
+    ) -> None:
+        """Initializes the service with its reporting and publishing ports."""
+        self._source = source
+        self._publisher = publisher
+        self._project_key = project_key
+        self._spreadsheet_ids = spreadsheet_ids
+        self._timezone = ZoneInfo(timezone_name)
+        self._timezone_name = timezone_name
+
+    def generate(self, reference_date: date) -> SpreadsheetSyncResult:
+        """Builds the current snapshot and publishes it to yearly spreadsheets."""
+        snapshot = _build_daily_snapshot(
+            self._source,
+            self._project_key,
+            reference_date,
+            self._timezone,
+            self._timezone_name,
+        )
+        urls = self._publish_yearly_requests(snapshot)
+        logger.info(
+            "Published {} worklogs to {} spreadsheet(s).",
+            len(snapshot.worklogs),
+            len(urls),
+        )
+        return SpreadsheetSyncResult(tuple(urls), len(snapshot.worklogs))
+
+    def _publish_yearly_requests(self, snapshot: DailyRawSnapshot) -> list[str]:
+        """Builds and publishes every yearly spreadsheet payload for the snapshot."""
+        urls: list[str] = []
+        for year in years_for_snapshot(snapshot):
+            request = build_spreadsheet_request(
+                snapshot=snapshot,
+                spreadsheet_id=_spreadsheet_id_for_year(self._spreadsheet_ids, year),
+                year=year,
+            )
+            urls.append(self._publisher.publish(request))
+        return urls
+
+
 def _build_monthly_report(
     worklogs: list[WorklogEntry],
     project_key: str,
@@ -182,6 +243,27 @@ def _build_monthly_report(
     )
 
 
+def _build_daily_snapshot(
+    source: WorklogSource,
+    project_key: str,
+    reference_date: date,
+    timezone: ZoneInfo,
+    timezone_name: str,
+) -> DailyRawSnapshot:
+    """Builds the in-memory daily snapshot shared by multiple use cases."""
+    window = rolling_window(reference_date)
+    generated_at = datetime.now(timezone)
+    worklogs = _sort_worklogs(source.fetch_worklogs(window))
+    return DailyRawSnapshot(
+        project_key=project_key,
+        snapshot_date=reference_date,
+        window=window,
+        generated_at=generated_at,
+        timezone_name=timezone_name,
+        worklogs=tuple(worklogs),
+    )
+
+
 def _sorted_tickets(
     tickets: dict[tuple[str, str], list[WorklogEntry]]
 ) -> list[tuple[str, str, list[WorklogEntry]]]:
@@ -199,6 +281,15 @@ def _sort_worklogs(worklogs: list[WorklogEntry]) -> list[WorklogEntry]:
         worklogs,
         key=lambda item: (item.issue_key, item.started_at, item.worklog_id),
     )
+
+
+def _spreadsheet_id_for_year(spreadsheet_ids: dict[int, str], year: int) -> str:
+    """Returns the configured spreadsheet ID for the requested year."""
+    try:
+        return spreadsheet_ids[year]
+    except KeyError as exc:
+        message = f"Missing Google Sheets spreadsheet ID for year {year}."
+        raise ValueError(message) from exc
 
 
 def _daily_snapshot_path(reference_date: date) -> str:

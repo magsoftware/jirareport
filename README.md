@@ -9,7 +9,7 @@ Aktualny stan projektu:
 - logowanie przez `loguru`,
 - testy `pytest` z coverage.
 
-Docelowo projekt ma tez publikowac dane do Google Sheets. Warstwa architektoniczna jest pod to przygotowana, ale adapter Sheets nie jest jeszcze zaimplementowany.
+Projekt potrafi juz publikowac dane do Google Sheets przez osobna komende synchronizacji.
 
 ## Spis tresci
 
@@ -72,6 +72,11 @@ REPORT_OUTPUT_DIR=reports
 # Uzywane dla backendu gcs
 GCS_BUCKET_NAME=twoj-bucket
 GCS_BUCKET_PREFIX=jirareport
+
+# Uzywane dla Google Sheets
+GOOGLE_APPLICATION_CREDENTIALS=/sciezka/do/service-account.json
+GOOGLE_SHEETS_ENABLED=true
+GOOGLE_SHEETS_ID_2026=twoj_spreadsheet_id
 ```
 
 ## Pierwsze uruchomienie testowe
@@ -196,9 +201,17 @@ uv run jirareport monthly
 uv run jirareport monthly --month 2026-03
 ```
 
+Synchronizacja do Google Sheets:
+
+```bash
+uv run jirareport sync sheets
+uv run jirareport sync sheets --date 2026-03-11
+```
+
 Domyslne zachowanie:
 - `daily` bierze date biezaca w strefie `REPORT_TIMEZONE`,
 - `monthly` bierze biezacy miesiac w strefie `REPORT_TIMEZONE`.
+- `sync sheets` bierze date biezaca w strefie `REPORT_TIMEZONE`.
 
 ## Integracje
 
@@ -264,16 +277,18 @@ Oficjalne materialy:
 
 ### Google Sheets
 
-Jeszcze niezaimplementowane w kodzie, ale to planowana integracja docelowa.
+Aktualnie zaimplementowane lokalnie i gotowe do uruchamiania przez CLI.
 
 Wymagane beda:
 - projekt GCP,
 - wlaczony Google Sheets API,
-- najpewniej takze Google Drive API, jesli skrypt ma tworzyc albo przenosic arkusze,
+- Google Drive API nie jest wymagane, jesli arkusz juz istnieje i znasz `spreadsheet_id`,
 - konto serwisowe albo federowana tozsamosc GCP,
 - arkusz Google Sheets udostepniony tej tozsamosci,
-- identyfikator arkusza `spreadsheet_id`.
+- identyfikator arkusza `spreadsheet_id`,
+- konfiguracja roczna typu `GOOGLE_SHEETS_ID_2026`.
 
+Planowany model:
 Planowany model:
 - `raw_worklogs` jako dane szczegolowe,
 - `monthly_summary` jako agregaty miesieczne,
@@ -327,6 +342,7 @@ To jest preferowane rozwiazanie wzgledem sekretu z kluczem JSON.
 4. Utworz arkusz docelowy albo wybierz istniejacy.
 5. Udostepnij arkusz emailowi service account z uprawnieniem co najmniej `Editor`.
 6. Zapisz `spreadsheet_id` z URL arkusza.
+7. Dodaj roczna zmienna konfiguracyjna, np. `GOOGLE_SHEETS_ID_2026`.
 
 Przyklad:
 - URL: `https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit`
@@ -449,4 +465,5 @@ Rekomendowane zmienne repozytorium:
 
 ### Uwaga o Google Sheets
 
-Workflow dzienny nie publikuje jeszcze do Google Sheets, bo adapter Sheets nie zostal jeszcze zaimplementowany w kodzie.
+Workflow dzienny nie publikuje jeszcze do Google Sheets automatycznie, ale adapter
+Sheets i komenda `sync sheets` sa juz zaimplementowane lokalnie.
