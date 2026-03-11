@@ -107,15 +107,15 @@ Coverage gate:
 
 ## Dokumentacja
 
-- [PRD.md](/Users/marek/repos/magsoftware/jirareport/docs/PRD.md)
-- [DEVELOP.md](/Users/marek/repos/magsoftware/jirareport/docs/DEVELOP.md)
-- [SHEETS_INTEGRATION.md](/Users/marek/repos/magsoftware/jirareport/docs/SHEETS_INTEGRATION.md)
+- [PRD.md](docs/PRD.md)
+- [DEVELOP.md](docs/DEVELOP.md)
+- [SHEETS_INTEGRATION.md](docs/SHEETS_INTEGRATION.md)
 
 ## GitHub Actions
 
 Repo zawiera workflowy:
-- [ci.yml](/Users/marek/repos/magsoftware/jirareport/.github/workflows/ci.yml)
-- [daily-report.yml](/Users/marek/repos/magsoftware/jirareport/.github/workflows/daily-report.yml)
+- [ci.yml](.github/workflows/ci.yml)
+- [daily-report.yml](.github/workflows/daily-report.yml)
 
 Automatyczna publikacja do Google Sheets w GitHub Actions nie jest jeszcze
 podlaczona do workflow.
