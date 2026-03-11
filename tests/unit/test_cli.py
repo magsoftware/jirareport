@@ -134,6 +134,11 @@ def test_main_dispatches_sync_sheets_command(
     monkeypatch.setattr(app, "_build_spreadsheet_publisher", lambda settings: object())
     monkeypatch.setattr(
         app,
+        "_build_spreadsheet_resolver",
+        lambda settings: object(),
+    )
+    monkeypatch.setattr(
+        app,
         "SheetsSyncService",
         lambda *args, **kwargs: fake_sync,
     )
@@ -165,6 +170,10 @@ def _settings() -> AppSettings:
             bucket_name=None,
             bucket_prefix="jirareport",
         ),
-        sheets=SheetsSettings(enabled=True, spreadsheet_ids={2026: "sheet-2026"}),
+        sheets=SheetsSettings(
+            enabled=True,
+            spreadsheet_ids={2026: "sheet-2026"},
+            title_prefix="Jira Worklog Analytics",
+        ),
         timezone_name="Europe/Warsaw",
     )

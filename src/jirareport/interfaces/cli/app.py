@@ -12,10 +12,18 @@ from jirareport.application.services import (
     SheetsSyncService,
 )
 from jirareport.domain.models import MonthId
-from jirareport.domain.ports import ReportStorage, SpreadsheetPublisher, WorklogSource
+from jirareport.domain.ports import (
+    ReportStorage,
+    SpreadsheetPublisher,
+    SpreadsheetResolver,
+    WorklogSource,
+)
 from jirareport.domain.time_range import current_date
 from jirareport.infrastructure.config import AppSettings, load_settings
-from jirareport.infrastructure.google.sheets_client import GoogleSheetsPublisher
+from jirareport.infrastructure.google.sheets_client import (
+    GoogleSheetsPublisher,
+    GoogleSheetsResolver,
+)
 from jirareport.infrastructure.jira_client import JiraWorklogSource
 from jirareport.infrastructure.logging_config import configure_logging
 from jirareport.infrastructure.storage import build_storage
@@ -37,7 +45,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_monthly(args.month, settings, source, storage)
     source = _build_source(settings)
     publisher = _build_spreadsheet_publisher(settings)
-    return _run_sync_sheets(args.date, settings, source, publisher)
+    resolver = _build_spreadsheet_resolver(settings)
+    return _run_sync_sheets(args.date, settings, source, publisher, resolver)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -160,6 +169,16 @@ def _build_spreadsheet_publisher(settings: AppSettings) -> SpreadsheetPublisher:
     return GoogleSheetsPublisher()
 
 
+def _build_spreadsheet_resolver(settings: AppSettings) -> SpreadsheetResolver:
+    """Builds the configured yearly spreadsheet resolver."""
+    if not settings.sheets.enabled:
+        raise ValueError("Google Sheets publishing is disabled.")
+    return GoogleSheetsResolver(
+        spreadsheet_ids=dict(settings.sheets.spreadsheet_ids),
+        title_prefix=settings.sheets.title_prefix,
+    )
+
+
 def _run_daily(
     input_date: str | None,
     settings: AppSettings,
@@ -214,6 +233,7 @@ def _run_sync_sheets(
     settings: AppSettings,
     source: WorklogSource,
     publisher: SpreadsheetPublisher,
+    resolver: SpreadsheetResolver,
 ) -> int:
     """Runs the Google Sheets synchronization use case."""
     if input_date:
@@ -223,8 +243,8 @@ def _run_sync_sheets(
     service = SheetsSyncService(
         source=source,
         publisher=publisher,
+        resolver=resolver,
         project_key=settings.jira.project_key,
-        spreadsheet_ids=settings.sheets.spreadsheet_ids,
         timezone_name=settings.timezone_name,
     )
     result = service.generate(reference_date)

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from jirareport.domain.models import DateRange, SpreadsheetPublishRequest, WorklogEntry
+from jirareport.domain.models import (
+    DateRange,
+    SpreadsheetPublishRequest,
+    SpreadsheetTarget,
+    WorklogEntry,
+)
 
 
 class WorklogSource(Protocol):
@@ -24,3 +29,10 @@ class SpreadsheetPublisher(Protocol):
 
     def publish(self, request: SpreadsheetPublishRequest) -> str:
         """Publishes a yearly spreadsheet payload and returns its URL."""
+
+
+class SpreadsheetResolver(Protocol):
+    """Resolves or creates the yearly spreadsheet used for publishing."""
+
+    def resolve(self, year: int) -> SpreadsheetTarget:
+        """Returns the spreadsheet target for the requested year."""

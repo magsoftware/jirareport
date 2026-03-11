@@ -22,7 +22,12 @@ from jirareport.domain.models import (
     TicketWorklogReport,
     WorklogEntry,
 )
-from jirareport.domain.ports import ReportStorage, SpreadsheetPublisher, WorklogSource
+from jirareport.domain.ports import (
+    ReportStorage,
+    SpreadsheetPublisher,
+    SpreadsheetResolver,
+    WorklogSource,
+)
 from jirareport.domain.time_range import month_range, months_in_range, rolling_window
 
 
@@ -171,15 +176,15 @@ class SheetsSyncService:
         self,
         source: WorklogSource,
         publisher: SpreadsheetPublisher,
+        resolver: SpreadsheetResolver,
         project_key: str,
-        spreadsheet_ids: dict[int, str],
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting and publishing ports."""
         self._source = source
         self._publisher = publisher
+        self._resolver = resolver
         self._project_key = project_key
-        self._spreadsheet_ids = spreadsheet_ids
         self._timezone = ZoneInfo(timezone_name)
         self._timezone_name = timezone_name
 
@@ -204,9 +209,10 @@ class SheetsSyncService:
         """Builds and publishes every yearly spreadsheet payload for the snapshot."""
         urls: list[str] = []
         for year in years_for_snapshot(snapshot):
+            target = self._resolver.resolve(year)
             request = build_spreadsheet_request(
                 snapshot=snapshot,
-                spreadsheet_id=_spreadsheet_id_for_year(self._spreadsheet_ids, year),
+                spreadsheet_id=target.spreadsheet_id,
                 year=year,
             )
             urls.append(self._publisher.publish(request))
@@ -283,13 +289,6 @@ def _sort_worklogs(worklogs: list[WorklogEntry]) -> list[WorklogEntry]:
     )
 
 
-def _spreadsheet_id_for_year(spreadsheet_ids: dict[int, str], year: int) -> str:
-    """Returns the configured spreadsheet ID for the requested year."""
-    try:
-        return spreadsheet_ids[year]
-    except KeyError as exc:
-        message = f"Missing Google Sheets spreadsheet ID for year {year}."
-        raise ValueError(message) from exc
 
 
 def _daily_snapshot_path(reference_date: date) -> str:

@@ -13,6 +13,7 @@ from jirareport.domain.models import (
     DateRange,
     MonthId,
     SpreadsheetPublishRequest,
+    SpreadsheetTarget,
     WorklogEntry,
 )
 
@@ -43,6 +44,20 @@ class FakeSpreadsheetPublisher:
     def publish(self, request: SpreadsheetPublishRequest) -> str:
         self.requests.append(request)
         return f"https://docs.google.com/spreadsheets/d/{request.spreadsheet_id}/edit"
+
+
+class FakeSpreadsheetResolver:
+    def __init__(self, mapping: dict[int, str]) -> None:
+        self.mapping = mapping
+        self.years: list[int] = []
+
+    def resolve(self, year: int) -> SpreadsheetTarget:
+        self.years.append(year)
+        return SpreadsheetTarget(
+            year=year,
+            spreadsheet_id=self.mapping[year],
+            spreadsheet_url=f"https://docs.google.com/spreadsheets/d/{self.mapping[year]}/edit",
+        )
 
 
 def test_daily_snapshot_generates_raw_and_monthly_reports(
@@ -167,11 +182,12 @@ def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
     ]
     source = FakeWorklogSource(worklogs)
     publisher = FakeSpreadsheetPublisher()
+    resolver = FakeSpreadsheetResolver({2026: "sheet-2026"})
     service = SheetsSyncService(
         source=source,
         publisher=publisher,
+        resolver=resolver,
         project_key="PRJ",
-        spreadsheet_ids={2026: "sheet-2026"},
         timezone_name="Europe/Warsaw",
     )
 
@@ -181,6 +197,7 @@ def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
         "https://docs.google.com/spreadsheets/d/sheet-2026/edit",
     )
     assert len(publisher.requests) == 1
+    assert resolver.years == [2026]
     request = publisher.requests[0]
     assert request.year == 2026
     raw_tab = request.worksheets[0]
@@ -191,5 +208,9 @@ def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
     assert monthly_tab.rows[0][0] == "month"
     assert monthly_tab.rows[1][0] == "2026-02"
     assert monthly_tab.rows[2][0] == "2026-03"
+    assert monthly_tab.rows[-1][0] == "VISIBLE_TOTALS"
+    assert monthly_tab.rows[-1][5] == "=SUBTOTAL(109,F2:F4)"
+    assert monthly_tab.rows[-1][6] == "=SUBTOTAL(109,G2:G4)"
+    assert monthly_tab.rows[-1][7] == "=SUBTOTAL(109,H2:H4)"
     metadata_tab = request.worksheets[3]
     assert metadata_tab.rows[1][0] == 2026

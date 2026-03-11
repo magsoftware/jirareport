@@ -89,8 +89,14 @@ def build_spreadsheet_request(
     )
     worksheets = (
         WorksheetData(RAW_WORKLOGS_TAB, _with_header(RAW_HEADERS, raw_rows)),
-        WorksheetData(MONTHLY_SUMMARY_TAB, _with_header(MONTHLY_HEADERS, monthly_rows)),
-        WorksheetData(DAILY_SUMMARY_TAB, _with_header(DAILY_HEADERS, daily_rows)),
+        WorksheetData(
+            MONTHLY_SUMMARY_TAB,
+            _with_summary_footer(MONTHLY_HEADERS, monthly_rows, "F", "G", "H"),
+        ),
+        WorksheetData(
+            DAILY_SUMMARY_TAB,
+            _with_summary_footer(DAILY_HEADERS, daily_rows, "G", "H", "I"),
+        ),
         WorksheetData(METADATA_TAB, _with_header(METADATA_HEADERS, metadata_rows)),
     )
     return SpreadsheetPublishRequest(
@@ -299,6 +305,67 @@ def _with_header(
 ) -> tuple[tuple[SheetCellValue, ...], ...]:
     """Prepends a header row to a worksheet payload."""
     return (header, *rows)
+
+
+def _with_summary_footer(
+    header: tuple[str, ...],
+    rows: tuple[tuple[SheetCellValue, ...], ...],
+    entries_column: str,
+    seconds_column: str,
+    hours_column: str,
+) -> tuple[tuple[SheetCellValue, ...], ...]:
+    """Prepends the header and appends a subtotal row for filtered views."""
+    data = _with_header(header, rows)
+    data_start_row = 2
+    data_end_row = len(rows) + 1
+    footer = _summary_footer_row(
+        len(header),
+        data_start_row,
+        data_end_row,
+        entries_column,
+        seconds_column,
+        hours_column,
+    )
+    return (*data, footer)
+
+
+def _summary_footer_row(
+    width: int,
+    data_start_row: int,
+    data_end_row: int,
+    entries_column: str,
+    seconds_column: str,
+    hours_column: str,
+) -> tuple[SheetCellValue, ...]:
+    """Builds the subtotal row appended to summary worksheets."""
+    cells: list[SheetCellValue] = ["" for _ in range(width)]
+    cells[0] = "VISIBLE_TOTALS"
+    cells[_column_to_index(entries_column)] = _subtotal_formula(
+        entries_column,
+        data_start_row,
+        data_end_row,
+    )
+    cells[_column_to_index(seconds_column)] = _subtotal_formula(
+        seconds_column,
+        data_start_row,
+        data_end_row,
+    )
+    cells[_column_to_index(hours_column)] = _subtotal_formula(
+        hours_column,
+        data_start_row,
+        data_end_row,
+    )
+    return tuple(cells)
+
+
+def _subtotal_formula(column: str, start_row: int, end_row: int) -> str:
+    """Builds a Google Sheets subtotal formula for one numeric column."""
+    return f"=SUBTOTAL(109,{column}{start_row}:{column}{end_row})"
+
+
+def _column_to_index(column: str) -> int:
+    """Converts a spreadsheet column label like 'A' to a zero-based index."""
+    return ord(column) - ord("A")
 
 
 def _sheet_boolean(value: bool) -> str:

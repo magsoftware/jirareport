@@ -36,6 +36,7 @@ class SheetsSettings:
 
     enabled: bool
     spreadsheet_ids: dict[int, str]
+    title_prefix: str
 
     def spreadsheet_id_for_year(self, year: int) -> str:
         """Returns the configured spreadsheet ID for the requested year."""
@@ -76,6 +77,7 @@ def load_settings() -> AppSettings:
     sheets = SheetsSettings(
         enabled=_sheets_enabled_from_env(sheet_ids),
         spreadsheet_ids=sheet_ids,
+        title_prefix=os.getenv("GOOGLE_SHEETS_TITLE_PREFIX", "Jira Worklog Analytics"),
     )
     timezone_name = os.getenv("REPORT_TIMEZONE", "Europe/Warsaw")
     return AppSettings(

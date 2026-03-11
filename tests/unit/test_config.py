@@ -33,6 +33,7 @@ def test_load_settings_defaults_to_gcs_when_bucket_present(
     assert settings.storage.bucket_prefix == "jirareport"
     assert settings.sheets.enabled is False
     assert settings.sheets.spreadsheet_ids == {}
+    assert settings.sheets.title_prefix == "Jira Worklog Analytics"
 
 
 def test_load_settings_supports_local_storage(
@@ -62,6 +63,7 @@ def test_load_settings_enables_google_sheets_when_ids_are_present(
 
     assert settings.sheets.enabled is True
     assert settings.sheets.spreadsheet_ids == {2026: "sheet-2026"}
+    assert settings.sheets.title_prefix == "Jira Worklog Analytics"
 
 
 def test_load_settings_rejects_unknown_google_sheets_enabled_value(

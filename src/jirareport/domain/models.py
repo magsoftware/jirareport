@@ -187,3 +187,12 @@ class SpreadsheetPublishRequest:
     year: int
     spreadsheet_id: str
     worksheets: tuple[WorksheetData, ...]
+
+
+@dataclass(frozen=True)
+class SpreadsheetTarget:
+    """Represents one resolved yearly spreadsheet destination."""
+
+    year: int
+    spreadsheet_id: str
+    spreadsheet_url: str

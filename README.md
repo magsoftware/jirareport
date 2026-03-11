@@ -76,6 +76,7 @@ GCS_BUCKET_PREFIX=jirareport
 # Uzywane dla Google Sheets
 GOOGLE_APPLICATION_CREDENTIALS=/sciezka/do/service-account.json
 GOOGLE_SHEETS_ENABLED=true
+GOOGLE_SHEETS_TITLE_PREFIX=Jira Worklog Analytics
 GOOGLE_SHEETS_ID_2026=twoj_spreadsheet_id
 ```
 
@@ -208,6 +209,13 @@ uv run jirareport sync sheets
 uv run jirareport sync sheets --date 2026-03-11
 ```
 
+Zachowanie integracji z Google Sheets:
+- jesli dla roku istnieje `GOOGLE_SHEETS_ID_<YEAR>`, dane trafiaja do wskazanego arkusza,
+- jesli dla roku nie ma skonfigurowanego ID, aplikacja utworzy nowy spreadsheet
+  o nazwie `GOOGLE_SHEETS_TITLE_PREFIX <YEAR>` i zaloguje jego URL oraz ID,
+- `monthly_summary` i `daily_summary` maja na koncu wiersz `VISIBLE_TOTALS`
+  z formulami `SUBTOTAL`, ktore aktualizuja sumy po zastosowaniu filtrow.
+
 Domyslne zachowanie:
 - `daily` bierze date biezaca w strefie `REPORT_TIMEZONE`,
 - `monthly` bierze biezacy miesiac w strefie `REPORT_TIMEZONE`.
@@ -287,6 +295,7 @@ Wymagane beda:
 - arkusz Google Sheets udostepniony tej tozsamosci,
 - identyfikator arkusza `spreadsheet_id`,
 - konfiguracja roczna typu `GOOGLE_SHEETS_ID_2026`.
+- opcjonalny prefiks nazw nowych arkuszy: `GOOGLE_SHEETS_TITLE_PREFIX`.
 
 Planowany model:
 Planowany model:
