@@ -57,6 +57,7 @@ src/jirareport/
   domain/
   application/
   infrastructure/
+    google/
   interfaces/cli/
   main.py
 
@@ -67,6 +68,7 @@ tests/
 docs/
   PRD.md
   DEVELOP.md
+  SHEETS_INTEGRATION.md
 ```
 
 ### 4.1. `src/jirareport/domain`
@@ -86,11 +88,13 @@ Pliki:
 Warstwa aplikacyjna zawiera:
 - use case'y,
 - serwisy budujace raporty,
-- serializatory JSON.
+- serializatory JSON,
+- budowe payloadow tabelarycznych dla Google Sheets.
 
 Pliki:
 - `services.py`
 - `serializers.py`
+- `spreadsheets.py`
 
 ### 4.3. `src/jirareport/infrastructure`
 
@@ -98,6 +102,7 @@ Warstwa infrastrukturalna zawiera:
 - konfiguracje aplikacji,
 - klienta Jira,
 - storage lokalny i GCS,
+- adapter Google Sheets,
 - konfiguracje logowania.
 
 Pliki:
@@ -105,6 +110,7 @@ Pliki:
 - `jira_client.py`
 - `storage.py`
 - `logging_config.py`
+- `google/sheets_client.py`
 
 ### 4.4. `src/jirareport/interfaces/cli`
 
@@ -141,13 +147,16 @@ Przeplyw wywolania:
 3. `load_settings()` buduje konfiguracje z `.env` i zmiennych srodowiskowych.
 4. `_build_source()` tworzy adapter Jira.
 5. `build_storage()` tworzy storage lokalny albo GCS.
-6. CLI uruchamia odpowiedni use case:
+6. CLI opcjonalnie buduje tez publisher i resolver Google Sheets.
+7. CLI uruchamia odpowiedni use case:
    - `DailySnapshotService`
    - `MonthlyReportService`
-7. Use case pobiera worklogi przez port `WorklogSource`.
-8. Use case serializuje wynik do JSON.
-9. Use case zapisuje JSON przez port `ReportStorage`.
-10. CLI loguje rezultat i konczy proces.
+   - `SheetsSyncService`
+8. Use case pobiera worklogi przez port `WorklogSource`.
+9. Use case serializuje wynik do JSON albo buduje tabular payload dla Sheets.
+10. Use case zapisuje JSON przez port `ReportStorage` albo publikuje dane przez
+    `SpreadsheetPublisher`.
+11. CLI loguje rezultat i konczy proces.
 
 ## 5A. Main Use Case
 
@@ -198,6 +207,16 @@ Ten use case sluzy do:
 - wygenerowania jednego raportu miesiecznego na zadany miesiac,
 - np. dla re-run, odtworzenia albo lokalnej analizy.
 
+Trzecim use case'em jest:
+- `SheetsSyncService`
+
+Ten use case sluzy do:
+- zbudowania aktualnego snapshotu w pamieci,
+- podzialu danych na lata raportowe,
+- publikacji do Google Sheets w modelu `spreadsheet per year`,
+- tworzenia nowego spreadsheetu rocznego, jesli nie ma dla niego
+  skonfigurowanego ID.
+
 ## 5B. End-to-End Processing Flow
 
 Ponizej opis pelnego flow przetwarzania danych od wejscia do wyniku.
@@ -207,6 +226,7 @@ Ponizej opis pelnego flow przetwarzania danych od wejscia do wyniku.
 Uzytkownik albo workflow GitHub Actions uruchamia:
 - `jirareport daily`
 - albo `jirareport monthly`
+- albo `jirareport sync sheets`
 
 CLI przyjmuje opcjonalnie:
 - `--date` dla snapshotu dziennego,
@@ -245,6 +265,8 @@ Warstwa:
 CLI buduje:
 - `JiraWorklogSource`
 - `LocalJsonStorage` albo `GcsJsonStorage`
+- `GoogleSheetsPublisher`
+- `GoogleSheetsResolver`
 
 To jest moment, w ktorym abstrakcje domenowe sa laczone z konkretnymi adapterami.
 
@@ -255,6 +277,9 @@ Jesli wybrano `daily`:
 
 Jesli wybrano `monthly`:
 - uruchamiany jest `MonthlyReportService.generate(month)`
+
+Jesli wybrano `sync sheets`:
+- uruchamiany jest `SheetsSyncService.generate(reference_date)`
 
 ### Krok 5. Wyznaczenie zakresu danych
 

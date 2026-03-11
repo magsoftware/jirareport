@@ -2,16 +2,15 @@
 
 ## 1. Document Purpose
 
-This document defines the target technical design for publishing Jira worklog
-reports from `jirareport` to Google Sheets.
+This document describes the technical design of publishing Jira worklog reports
+from `jirareport` to Google Sheets.
 
 It focuses on the agreed model:
 - Google Cloud Storage remains the canonical data store,
 - Google Sheets is a reporting and presentation layer,
 - one spreadsheet is maintained per calendar year.
 
-This document is intended as an implementation specification for the future
-Google Sheets integration.
+It covers the implemented integration and the constraints that shaped it.
 
 ## 2. High-Level Model
 
@@ -88,7 +87,7 @@ Optional future tabs:
 - `ticket_summary`
 - `person_summary`
 
-Only the four tabs above are in scope for the first implementation.
+The current implementation manages only the four tabs above.
 
 ## 5. Tab Specifications
 
@@ -215,8 +214,7 @@ Contains synchronization metadata that makes the spreadsheet self-describing.
 
 One row per synchronization run for the given spreadsheet year.
 
-For the first implementation the tab may contain only the latest state
-overwritten on each run.
+The current implementation stores only the latest state overwritten on each run.
 
 ### Columns
 
@@ -237,6 +235,18 @@ The tab should use the following columns in the exact order:
 - `spreadsheet_year` identifies the target yearly workbook
 - `last_run_at` should use ISO 8601 without fractional seconds
 - counts are limited to rows published to the current yearly spreadsheet
+
+## 5.5. Summary Footer Rows
+
+The `monthly_summary` and `daily_summary` tabs contain one additional footer
+row:
+- label: `VISIBLE_TOTALS`
+- formulas based on `SUBTOTAL(109;...)` for spreadsheets using `pl_PL`
+- formulas based on `SUBTOTAL(109,...)` for spreadsheets using locales with
+  comma separators
+
+This row is intentionally excluded from the sheet filter range so subtotal
+values react to user filtering by author, month, date, or issue.
 
 ## 6. Data Mapping
 
@@ -412,14 +422,14 @@ This avoids lifecycle and ownership issues caused by automation-created files.
 
 ## 8.2. Spreadsheet Discovery
 
-For the first implementation, spreadsheet discovery should be configuration-based
-rather than search-based.
+The current implementation resolves spreadsheets by configuration first and
+creates missing yearly spreadsheets when necessary.
 
-Recommended model:
-- one configured spreadsheet ID per year
-- no lookup by title during runtime
-
-This is more deterministic and easier to support in CI.
+Current model:
+- one configured spreadsheet ID per year when available
+- if no yearly ID exists, the application creates a spreadsheet named
+  `Jira Worklog Analytics <YEAR>` or `<GOOGLE_SHEETS_TITLE_PREFIX> <YEAR>`
+- no Drive-based lookup by title during runtime
 
 ## 9. Configuration Requirements
 
@@ -468,7 +478,7 @@ Optional future variables may include:
 - `GOOGLE_SHEETS_DAILY_TAB_NAME=daily_summary`
 - `GOOGLE_SHEETS_METADATA_TAB_NAME=metadata`
 
-For the first implementation, hard-coded tab names are acceptable.
+The current implementation keeps tab names fixed in code.
 
 ## 10. Implementation Recommendations
 
@@ -488,14 +498,13 @@ Recommended additions:
 
 ## 10.2. Synchronization Command
 
-The recommended first command is a dedicated CLI action:
+The implemented CLI action is:
 
 ```text
 jirareport sync sheets --date YYYY-MM-DD
 ```
 
-This is preferred over bundling Sheets publishing directly into `daily` from the
-start because:
+This is preferred over bundling Sheets publishing directly into `daily` because:
 - debugging is easier,
 - failures are isolated,
 - rollout can be staged.
@@ -513,7 +522,7 @@ The publisher should:
 
 ## 11. Acceptance Criteria
 
-The first implementation should satisfy all of the following:
+The current implementation satisfies all of the following:
 
 1. The system can publish raw worklogs to a yearly spreadsheet.
 2. The system can publish `monthly_summary`.
@@ -528,7 +537,7 @@ The first implementation should satisfy all of the following:
 
 ## 12. Out of Scope for the First Version
 
-The following items are intentionally out of scope:
+The following items remain intentionally out of scope:
 - rich spreadsheet formatting,
 - charts and dashboards,
 - formulas managed by the application,
