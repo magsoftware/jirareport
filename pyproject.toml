@@ -1,0 +1,62 @@
+[project]
+name = "jirareport"
+version = "0.1.0"
+description = "Jira Report"
+readme = "README.md"
+authors = [
+    { name = "Marek Gmyrek", email = "marek.gmyrek@hycom.digital" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "loguru>=0.7.3",
+    "google-cloud-storage>=3.1.0",
+    "python-dotenv>=1.0.1",
+    "requests>=2.32.5",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "pytest>=8.3.5",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.11.0",
+    "types-requests>=2.32.0.20250328",
+]
+
+[project.scripts]
+jirareport = "jirareport.main:main"
+
+[build-system]
+requires = ["uv_build>=0.10.7,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+addopts = "--cov=src/jirareport --cov-report=term-missing --cov-fail-under=90"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/jirareport"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "B",
+    "E",
+    "F",
+    "I",
+    "UP",
+]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src", "tests"]
+strict = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["google.cloud", "google.cloud.storage"]
+ignore_missing_imports = true

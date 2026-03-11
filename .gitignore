@@ -1,0 +1,52 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+*$py.class
+build/
+dist/
+wheels/
+*.egg-info
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv
+venv/
+env/
+ENV/
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Test and report artifacts
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+htmlcov/
+coverage.xml
+reports/
+
+# OS-specific files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+Thumbs.db
+Desktop.ini
+
+# Editor and IDE files
+.idea/
+*.iml
+.vscode/
+.cursor/
+.fleet/
+.history/
+.ropeproject/
