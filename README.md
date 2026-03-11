@@ -11,6 +11,24 @@ Aktualny stan projektu:
 
 Docelowo projekt ma tez publikowac dane do Google Sheets. Warstwa architektoniczna jest pod to przygotowana, ale adapter Sheets nie jest jeszcze zaimplementowany.
 
+## Spis tresci
+
+- [Wymagania](#wymagania)
+- [Setup projektu](#setup-projektu)
+- [Pierwsze uruchomienie testowe](#pierwsze-uruchomienie-testowe)
+- [Testy](#testy)
+- [Ruff](#ruff)
+- [mypy](#mypy)
+- [Coverage](#coverage)
+- [Uzycie CLI](#uzycie-cli)
+- [Integracje](#integracje)
+- [Co trzeba skonfigurowac po stronie GCP](#co-trzeba-skonfigurowac-po-stronie-gcp)
+- [Co trzeba skonfigurowac po stronie Google Sheets](#co-trzeba-skonfigurowac-po-stronie-google-sheets)
+- [Rekomendowana konfiguracja lokalna vs CI](#rekomendowana-konfiguracja-lokalna-vs-ci)
+- [Struktura projektu](#struktura-projektu)
+- [Dokumentacja projektowa](#dokumentacja-projektowa)
+- [GitHub Actions](#github-actions)
+
 ## Wymagania
 
 - Python `3.13`
