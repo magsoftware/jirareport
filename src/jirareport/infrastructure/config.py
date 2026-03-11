@@ -12,6 +12,8 @@ StorageBackend = Literal["gcs", "local"]
 
 @dataclass(frozen=True)
 class JiraSettings:
+    """Holds Jira API configuration required by the report source."""
+
     base_url: str
     email: str
     api_token: str
@@ -20,6 +22,8 @@ class JiraSettings:
 
 @dataclass(frozen=True)
 class StorageSettings:
+    """Holds configuration for the selected report storage backend."""
+
     backend: StorageBackend
     local_output_dir: Path
     bucket_name: str | None
@@ -28,12 +32,15 @@ class StorageSettings:
 
 @dataclass(frozen=True)
 class AppSettings:
+    """Represents the full application configuration."""
+
     jira: JiraSettings
     storage: StorageSettings
     timezone_name: str
 
 
 def load_settings() -> AppSettings:
+    """Loads and validates application settings from the environment."""
     load_dotenv()
     jira = JiraSettings(
         base_url=_required_env("JIRA_BASE_URL").rstrip("/"),
@@ -53,6 +60,7 @@ def load_settings() -> AppSettings:
 
 
 def _required_env(name: str) -> str:
+    """Returns a required environment variable or raises an error."""
     value = os.getenv(name)
     if not value:
         raise ValueError(f"Missing required environment variable: {name}")
@@ -60,6 +68,12 @@ def _required_env(name: str) -> str:
 
 
 def _storage_backend_from_env() -> StorageBackend:
+    """Determines the storage backend from configuration.
+
+    An explicit backend wins. If no backend is provided, the function defaults
+    to GCS when a bucket name is configured and otherwise falls back to local
+    storage.
+    """
     backend_value = os.getenv("REPORT_STORAGE_BACKEND")
     if backend_value in {None, ""}:
         return "gcs" if os.getenv("GCS_BUCKET_NAME") else "local"
@@ -69,6 +83,7 @@ def _storage_backend_from_env() -> StorageBackend:
 
 
 def _bucket_name_for_backend(backend: StorageBackend) -> str | None:
+    """Returns the bucket name required by the selected storage backend."""
     if backend == "local":
         return os.getenv("GCS_BUCKET_NAME")
     return _required_env("GCS_BUCKET_NAME")

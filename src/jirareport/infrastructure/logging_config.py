@@ -6,6 +6,7 @@ from loguru import logger
 
 
 def configure_logging(debug: bool) -> None:
+    """Configures loguru for CLI and GitHub Actions execution."""
     logger.remove()
     level = "DEBUG" if debug else "INFO"
     logger.add(

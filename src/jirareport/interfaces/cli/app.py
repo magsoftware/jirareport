@@ -17,6 +17,7 @@ from jirareport.infrastructure.storage import build_storage
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Runs the CLI entrypoint and dispatches the selected command."""
     parser = _build_parser()
     args = parser.parse_args(argv)
     configure_logging(args.debug)
@@ -34,6 +35,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Builds the top-level CLI parser."""
     parser = argparse.ArgumentParser(
         description=(
             "Generate Jira worklog reports as JSON files. "
@@ -96,6 +98,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _build_source(settings: AppSettings) -> WorklogSource:
+    """Builds the configured worklog source adapter."""
     jira = settings.jira
     return JiraWorklogSource(
         base_url=jira.base_url,
@@ -112,6 +115,12 @@ def _run_daily(
     source: WorklogSource,
     storage: ReportStorage,
 ) -> int:
+    """Runs the main daily use case.
+
+    This command is the primary operational flow of the tool. It generates a
+    raw daily snapshot and refreshes all derived monthly reports affected by
+    the rolling reporting window.
+    """
     if input_date:
         reference_date = date.fromisoformat(input_date)
     else:
@@ -133,6 +142,7 @@ def _run_monthly(
     source: WorklogSource,
     storage: ReportStorage,
 ) -> int:
+    """Runs the ad hoc monthly report generation use case."""
     if input_month:
         month = MonthId.parse(input_month)
     else:

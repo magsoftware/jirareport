@@ -20,6 +20,8 @@ RequestParams = Mapping[str, RequestParamValue]
 
 
 class ResponseProtocol(Protocol):
+    """Describes the subset of HTTP response behavior used by the adapter."""
+
     def raise_for_status(self) -> None:
         """Raises an exception when the response is unsuccessful."""
 
@@ -28,6 +30,8 @@ class ResponseProtocol(Protocol):
 
 
 class SessionProtocol(Protocol):
+    """Describes the subset of HTTP session behavior used by the adapter."""
+
     def get(
         self,
         url: str,
@@ -38,6 +42,14 @@ class SessionProtocol(Protocol):
 
 
 class JiraWorklogSource(WorklogSource):
+    """Fetches Jira worklogs and maps them to normalized domain models.
+
+    The adapter handles Jira-specific concerns such as JQL construction,
+    pagination, retries, and timezone conversion. The rest of the application
+    sees only normalized ``WorklogEntry`` objects through the
+    ``WorklogSource`` protocol.
+    """
+
     def __init__(
         self,
         base_url: str,
@@ -47,12 +59,14 @@ class JiraWorklogSource(WorklogSource):
         timezone_name: str,
         session: SessionProtocol | None = None,
     ) -> None:
+        """Initializes the Jira worklog source."""
         self._base_url = base_url
         self._project_key = project_key
         self._timezone = ZoneInfo(timezone_name)
         self._session = session or _build_session(email, api_token)
 
     def fetch_worklogs(self, window: DateRange) -> list[WorklogEntry]:
+        """Fetches all worklogs for issues matching the reporting window."""
         worklogs: list[WorklogEntry] = []
         for issue in self._search_issues(window):
             issue_worklogs = self._fetch_issue_worklogs(issue, window)
@@ -60,6 +74,7 @@ class JiraWorklogSource(WorklogSource):
         return worklogs
 
     def _search_issues(self, window: DateRange) -> list[Issue]:
+        """Fetches all Jira issues with worklogs in the requested window."""
         issues: list[Issue] = []
         start_at = 0
         next_page_token: str | None = None
@@ -86,6 +101,7 @@ class JiraWorklogSource(WorklogSource):
         start_at: int,
         next_page_token: str | None = None,
     ) -> Mapping[str, object]:
+        """Fetches one page of Jira issues for the reporting JQL."""
         jql = _worklog_window_jql(self._project_key, window)
         params: dict[str, RequestParamValue] = {
             "jql": jql,
@@ -104,6 +120,7 @@ class JiraWorklogSource(WorklogSource):
         issue: Issue,
         window: DateRange,
     ) -> list[WorklogEntry]:
+        """Fetches and filters all worklogs for one Jira issue."""
         worklogs: list[WorklogEntry] = []
         start_at = 0
         while True:
@@ -122,6 +139,7 @@ class JiraWorklogSource(WorklogSource):
         path: str,
         params: RequestParams | None = None,
     ) -> Mapping[str, object]:
+        """Performs a GET request and validates the JSON payload shape."""
         response = self._session.get(
             f"{self._base_url}{path}",
             params=params,
@@ -135,6 +153,7 @@ class JiraWorklogSource(WorklogSource):
 
 
 def _build_session(email: str, api_token: str) -> SessionProtocol:
+    """Builds a configured HTTP session with retries for Jira requests."""
     session = requests.Session()
     session.auth = HTTPBasicAuth(email, api_token)
     session.headers.update({"Accept": "application/json"})
@@ -151,6 +170,7 @@ def _build_session(email: str, api_token: str) -> SessionProtocol:
 
 
 def _worklog_window_jql(project_key: str, window: DateRange) -> str:
+    """Builds the JQL used to find issues with worklogs in the window."""
     return (
         f'project = "{project_key}" '
         f'AND worklogDate >= "{window.start.isoformat()}" '
@@ -160,6 +180,7 @@ def _worklog_window_jql(project_key: str, window: DateRange) -> str:
 
 
 def _parse_issues(payload: Mapping[str, object]) -> list[Issue]:
+    """Extracts issue keys and summaries from a Jira search payload."""
     result: list[Issue] = []
     for item in _payload_list(payload, "issues"):
         if not isinstance(item, Mapping):
@@ -182,6 +203,7 @@ def _parse_worklogs(
     window: DateRange,
     timezone: ZoneInfo,
 ) -> list[WorklogEntry]:
+    """Extracts normalized worklogs from one issue worklog payload."""
     entries: list[WorklogEntry] = []
     for item in _payload_list(payload, "worklogs"):
         if not isinstance(item, Mapping):
@@ -197,6 +219,7 @@ def _to_worklog_entry(
     worklog: Mapping[str, object],
     timezone: ZoneInfo,
 ) -> WorklogEntry:
+    """Maps one Jira worklog payload to the domain model."""
     started_at = _parse_jira_datetime(str(worklog["started"])).astimezone(timezone)
     duration_seconds = _coerce_int(worklog.get("timeSpentSeconds", 0))
     author = worklog.get("author") or {}
@@ -215,6 +238,7 @@ def _to_worklog_entry(
 
 
 def _parse_jira_datetime(value: str) -> datetime:
+    """Parses Jira datetime strings with or without fractional seconds."""
     for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z"):
         try:
             return datetime.strptime(value, fmt)
@@ -224,21 +248,25 @@ def _parse_jira_datetime(value: str) -> datetime:
 
 
 def _optional_string(value: object) -> str | None:
+    """Returns a string value or None for empty payload fields."""
     if value is None or value == "":
         return None
     return str(value)
 
 
 def _payload_list(payload: Mapping[str, object], key: str) -> list[object]:
+    """Safely reads a list field from a Jira payload."""
     value = payload.get(key)
     return value if isinstance(value, list) else []
 
 
 def _payload_int(payload: Mapping[str, object], key: str) -> int:
+    """Safely reads an integer field from a Jira payload."""
     return _coerce_int(payload.get(key, 0))
 
 
 def _payload_optional_int(payload: Mapping[str, object], key: str) -> int | None:
+    """Safely reads an optional integer field from a Jira payload."""
     value = payload.get(key)
     if isinstance(value, int):
         return value
@@ -248,14 +276,17 @@ def _payload_optional_int(payload: Mapping[str, object], key: str) -> int | None
 
 
 def _payload_bool(payload: Mapping[str, object], key: str) -> bool:
+    """Safely reads a boolean field from a Jira payload."""
     value = payload.get(key)
     return value if isinstance(value, bool) else False
 
 
 def _payload_string(payload: Mapping[str, object], key: str) -> str | None:
+    """Safely reads a non-empty string field from a Jira payload."""
     value = payload.get(key)
     return value if isinstance(value, str) and value else None
 
 
 def _coerce_int(value: object) -> int:
+    """Converts a Jira payload value to an integer when possible."""
     return int(value) if isinstance(value, int | str) else 0

@@ -24,6 +24,8 @@ from jirareport.domain.time_range import month_range, months_in_range, rolling_w
 
 @dataclass(frozen=True)
 class DailySnapshotResult:
+    """Describes the output of the daily snapshot use case."""
+
     snapshot_path: str
     monthly_paths: tuple[str, ...]
     worklog_count: int
@@ -31,12 +33,21 @@ class DailySnapshotResult:
 
 @dataclass(frozen=True)
 class MonthlyReportResult:
+    """Describes the output of the monthly report use case."""
+
     report_path: str
     ticket_count: int
     worklog_count: int
 
 
 class DailySnapshotService:
+    """Implements the main daily reporting use case.
+
+    This service is the core of the tool. It fetches worklogs for the rolling
+    reporting window, writes the raw daily snapshot, and refreshes all derived
+    monthly reports affected by that window.
+    """
+
     def __init__(
         self,
         source: WorklogSource,
@@ -44,6 +55,7 @@ class DailySnapshotService:
         project_key: str,
         timezone_name: str,
     ) -> None:
+        """Initializes the service with its reporting dependencies."""
         self._source = source
         self._storage = storage
         self._project_key = project_key
@@ -51,6 +63,15 @@ class DailySnapshotService:
         self._timezone_name = timezone_name
 
     def generate(self, reference_date: date) -> DailySnapshotResult:
+        """Generates the raw daily snapshot and derived monthly reports.
+
+        Args:
+            reference_date: The day used as the upper bound of the rolling
+                reporting window.
+
+        Returns:
+            Metadata describing the written raw snapshot and derived reports.
+        """
         window = rolling_window(reference_date)
         generated_at = datetime.now(self._timezone)
         worklogs = _sort_worklogs(self._source.fetch_worklogs(window))
@@ -76,6 +97,7 @@ class DailySnapshotService:
         window: DateRange,
         generated_at: datetime,
     ) -> tuple[str, ...]:
+        """Writes derived monthly reports for every month covered by the window."""
         paths: list[str] = []
         for month in months_in_range(window):
             report = _build_monthly_report(
@@ -94,6 +116,8 @@ class DailySnapshotService:
 
 
 class MonthlyReportService:
+    """Builds a single derived monthly report on demand."""
+
     def __init__(
         self,
         source: WorklogSource,
@@ -101,6 +125,7 @@ class MonthlyReportService:
         project_key: str,
         timezone_name: str,
     ) -> None:
+        """Initializes the service with its reporting dependencies."""
         self._source = source
         self._storage = storage
         self._project_key = project_key
@@ -108,6 +133,7 @@ class MonthlyReportService:
         self._timezone_name = timezone_name
 
     def generate(self, month: MonthId) -> MonthlyReportResult:
+        """Generates one monthly report for the requested month."""
         window = month_range(month)
         generated_at = datetime.now(self._timezone)
         worklogs = _sort_worklogs(self._source.fetch_worklogs(window))
@@ -133,6 +159,7 @@ def _build_monthly_report(
     generated_at: datetime,
     timezone_name: str,
 ) -> MonthlyWorklogReport:
+    """Builds a monthly report by grouping worklogs per ticket."""
     relevant = [entry for entry in worklogs if month.contains(entry.started_at.date())]
     tickets: dict[tuple[str, str], list[WorklogEntry]] = {}
     for entry in relevant:
@@ -158,6 +185,7 @@ def _build_monthly_report(
 def _sorted_tickets(
     tickets: dict[tuple[str, str], list[WorklogEntry]]
 ) -> list[tuple[str, str, list[WorklogEntry]]]:
+    """Returns grouped tickets sorted by issue key."""
     items = [
         (issue_key, summary, entries)
         for (issue_key, summary), entries in tickets.items()
@@ -166,6 +194,7 @@ def _sorted_tickets(
 
 
 def _sort_worklogs(worklogs: list[WorklogEntry]) -> list[WorklogEntry]:
+    """Returns worklogs sorted for deterministic output."""
     return sorted(
         worklogs,
         key=lambda item: (item.issue_key, item.started_at, item.worklog_id),
@@ -173,8 +202,10 @@ def _sort_worklogs(worklogs: list[WorklogEntry]) -> list[WorklogEntry]:
 
 
 def _daily_snapshot_path(reference_date: date) -> str:
+    """Builds the storage path for a raw daily snapshot."""
     return f"raw/daily/{reference_date:%Y/%m/%Y-%m-%d}.json"
 
 
 def _monthly_report_path(month: MonthId) -> str:
+    """Builds the storage path for a derived monthly report."""
     return f"derived/monthly/{month.year:04d}/{month.label()}.json"

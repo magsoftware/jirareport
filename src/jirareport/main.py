@@ -1,4 +1,4 @@
-from __future__ import annotations
+"""Package entry point for the Jira worklog reporting CLI."""
 
 from jirareport.interfaces.cli.app import main
 
