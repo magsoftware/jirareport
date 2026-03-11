@@ -34,13 +34,64 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate Jira worklog reports.")
-    parser.add_argument("--debug", action="store_true", help="Enable verbose logging.")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    daily = subparsers.add_parser("daily", help="Generate daily raw snapshot.")
-    daily.add_argument("--date", type=str, help="Snapshot date in YYYY-MM-DD format.")
-    monthly = subparsers.add_parser("monthly", help="Generate monthly report.")
-    monthly.add_argument("--month", type=str, help="Target month in YYYY-MM format.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Generate Jira worklog reports as JSON files. "
+            "The daily command creates a raw snapshot and refreshes "
+            "monthly derived reports for the rolling window."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  jirareport daily\n"
+            "  jirareport daily --date 2026-03-11\n"
+            "  jirareport monthly\n"
+            "  jirareport monthly --month 2026-03"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging, including the exact JQL sent to Jira.",
+    )
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+        title="commands",
+        metavar="{daily,monthly}",
+    )
+    daily = subparsers.add_parser(
+        "daily",
+        help="Generate a daily raw snapshot and refresh derived monthly reports.",
+        description=(
+            "Generate a raw snapshot for the given day and rebuild derived "
+            "monthly reports for all months covered by the rolling window."
+        ),
+    )
+    daily.add_argument(
+        "--date",
+        type=str,
+        help=(
+            "Reference date in YYYY-MM-DD format. "
+            "Defaults to the current date in REPORT_TIMEZONE."
+        ),
+    )
+    monthly = subparsers.add_parser(
+        "monthly",
+        help="Generate a derived report for a single target month.",
+        description=(
+            "Generate a monthly report for a single calendar month "
+            "without creating a daily raw snapshot."
+        ),
+    )
+    monthly.add_argument(
+        "--month",
+        type=str,
+        help=(
+            "Target month in YYYY-MM format. "
+            "Defaults to the current month in REPORT_TIMEZONE."
+        ),
+    )
     return parser
 
 
