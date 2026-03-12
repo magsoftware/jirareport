@@ -96,6 +96,22 @@ class Issue:
 
 
 @dataclass(frozen=True)
+class JiraSpace:
+    """Represents one Jira reporting space configured in the application."""
+
+    key: str
+    name: str
+    slug: str
+    board_id: int | None = None
+    google_sheets_ids: dict[int, str] | None = None
+
+    @property
+    def safe_google_sheets_ids(self) -> dict[int, str]:
+        """Returns configured yearly spreadsheet IDs or an empty mapping."""
+        return self.google_sheets_ids or {}
+
+
+@dataclass(frozen=True)
 class WorklogEntry:
     """Represents a single normalized Jira worklog entry.
 
@@ -138,12 +154,17 @@ class WorklogEntry:
 class DailyRawSnapshot:
     """Represents the raw output of the main daily reporting use case."""
 
-    project_key: str
+    space: JiraSpace
     snapshot_date: date
     window: DateRange
     generated_at: datetime
     timezone_name: str
     worklogs: tuple[WorklogEntry, ...]
+
+    @property
+    def project_key(self) -> str:
+        """Returns the Jira project key for compatibility with existing code."""
+        return self.space.key
 
 
 @dataclass(frozen=True)
@@ -165,11 +186,16 @@ class TicketWorklogReport:
 class MonthlyWorklogReport:
     """Represents the derived monthly report for a single calendar month."""
 
-    project_key: str
+    space: JiraSpace
     month: MonthId
     generated_at: datetime
     timezone_name: str
     tickets: tuple[TicketWorklogReport, ...]
+
+    @property
+    def project_key(self) -> str:
+        """Returns the Jira project key for compatibility with existing code."""
+        return self.space.key
 
 
 @dataclass(frozen=True)

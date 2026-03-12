@@ -11,6 +11,7 @@ from jirareport.application.services import (
 )
 from jirareport.domain.models import (
     DateRange,
+    JiraSpace,
     MonthId,
     SpreadsheetPublishRequest,
     SpreadsheetTarget,
@@ -62,6 +63,7 @@ class FakeSpreadsheetResolver:
 
 def test_daily_snapshot_generates_raw_and_monthly_reports(
     make_worklog: Callable[..., WorklogEntry],
+    make_space: Callable[..., JiraSpace],
 ) -> None:
     worklogs = [
         make_worklog(
@@ -91,20 +93,27 @@ def test_daily_snapshot_generates_raw_and_monthly_reports(
     ]
     source = FakeWorklogSource(worklogs)
     storage = FakeStorage()
-    service = DailySnapshotService(source, storage, "PRJ", "Europe/Warsaw")
+    space = make_space(key="PRJ", name="Project", slug="project")
+    service = DailySnapshotService(source, storage, space, "Europe/Warsaw")
 
     result = service.generate(date(2026, 3, 11))
 
-    assert result.snapshot_path == "raw/daily/2026/03/2026-03-11.json"
+    assert (
+        result.snapshot_path
+        == "spaces/PRJ/project/raw/daily/2026/03/2026-03-11.json"
+    )
     assert result.monthly_paths == (
-        "derived/monthly/2026/2026-02.json",
-        "derived/monthly/2026/2026-03.json",
+        "spaces/PRJ/project/derived/monthly/2026/2026-02.json",
+        "spaces/PRJ/project/derived/monthly/2026/2026-03.json",
     )
     assert source.windows == [DateRange(start=date(2026, 2, 1), end=date(2026, 3, 11))]
     raw_payload = storage.payloads[result.snapshot_path]
     assert raw_payload["report_type"] == "daily_raw_snapshot"
+    assert raw_payload["space"]["slug"] == "project"
     assert len(raw_payload["worklogs"]) == 3
-    march_payload = storage.payloads["derived/monthly/2026/2026-03.json"]
+    march_payload = storage.payloads[
+        "spaces/PRJ/project/derived/monthly/2026/2026-03.json"
+    ]
     issue_keys = [ticket["issue_key"] for ticket in march_payload["tickets"]]
     assert issue_keys == ["PRJ-1", "PRJ-2"]
     assert len(march_payload["tickets"][0]["bookings"]) == 2
@@ -115,6 +124,7 @@ def test_daily_snapshot_generates_raw_and_monthly_reports(
 
 def test_monthly_report_filters_to_requested_month(
     make_worklog: Callable[..., WorklogEntry],
+    make_space: Callable[..., JiraSpace],
 ) -> None:
     worklogs = [
         make_worklog(
@@ -136,11 +146,12 @@ def test_monthly_report_filters_to_requested_month(
     ]
     source = FakeWorklogSource(worklogs)
     storage = FakeStorage()
-    service = MonthlyReportService(source, storage, "PRJ", "Europe/Warsaw")
+    space = make_space(key="PRJ", name="Project", slug="project")
+    service = MonthlyReportService(source, storage, space, "Europe/Warsaw")
 
     result = service.generate(MonthId(year=2026, month=3))
 
-    assert result.report_path == "derived/monthly/2026/2026-03.json"
+    assert result.report_path == "spaces/PRJ/project/derived/monthly/2026/2026-03.json"
     assert result.ticket_count == 1
     payload = storage.payloads[result.report_path]
     assert payload["month"] == "2026-03"
@@ -150,6 +161,7 @@ def test_monthly_report_filters_to_requested_month(
 
 def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
     make_worklog: Callable[..., WorklogEntry],
+    make_space: Callable[..., JiraSpace],
 ) -> None:
     worklogs = [
         make_worklog(
@@ -183,11 +195,17 @@ def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
     source = FakeWorklogSource(worklogs)
     publisher = FakeSpreadsheetPublisher()
     resolver = FakeSpreadsheetResolver({2026: "sheet-2026"})
+    space = make_space(
+        key="PRJ",
+        name="Project",
+        slug="project",
+        google_sheets_ids={2026: "sheet-2026"},
+    )
     service = SheetsSyncService(
         source=source,
         publisher=publisher,
         resolver=resolver,
-        project_key="PRJ",
+        space=space,
         timezone_name="Europe/Warsaw",
     )
 
@@ -213,4 +231,5 @@ def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
     assert monthly_tab.rows[-1][6] == "=SUBTOTAL(109,G2:G4)"
     assert monthly_tab.rows[-1][7] == "=SUBTOTAL(109,H2:H4)"
     metadata_tab = request.worksheets[3]
-    assert metadata_tab.rows[1][0] == 2026
+    assert metadata_tab.rows[1][0] == "PRJ"
+    assert metadata_tab.rows[1][3] == 2026

@@ -225,3 +225,100 @@ def test_google_sheets_publisher_localizes_formulas_for_polish_locale() -> None:
             ],
         ),
     ]
+
+
+def test_google_sheets_resolver_reuses_existing_spreadsheet_id() -> None:
+    resolver = GoogleSheetsResolver(
+        spreadsheet_ids={2026: "sheet-2026"},
+        title_prefix="Jira Worklog Analytics",
+    )
+
+    target = resolver.resolve(2026)
+
+    assert target.spreadsheet_id == "sheet-2026"
+    assert target.spreadsheet_url == "https://docs.google.com/spreadsheets/d/sheet-2026/edit"
+
+
+def test_google_sheets_publisher_skips_filter_for_metadata_and_empty_number_formats(
+) -> None:
+    service = FakeSheetsService(["metadata"], locale="en_US")
+    publisher = GoogleSheetsPublisher(service_factory=lambda: service)
+    request = SpreadsheetPublishRequest(
+        year=2026,
+        spreadsheet_id="sheet-2026",
+        worksheets=(WorksheetData("metadata", (("h1", "h2"),)),),
+    )
+
+    publisher.publish(request)
+
+    formatting_requests = service.spreadsheets_api.batch_updates[-1]["requests"]
+    assert isinstance(formatting_requests, list)
+    assert not any(
+        "setBasicFilter" in request_item for request_item in formatting_requests
+    )
+
+
+def test_google_sheets_publisher_formats_daily_summary_columns() -> None:
+    service = FakeSheetsService(["daily_summary"], locale="en_US")
+    publisher = GoogleSheetsPublisher(service_factory=lambda: service)
+    request = SpreadsheetPublishRequest(
+        year=2026,
+        spreadsheet_id="sheet-2026",
+        worksheets=(
+            WorksheetData(
+                "daily_summary",
+                (
+                    (
+                        "date",
+                        "month",
+                        "issue",
+                        "summary",
+                        "author",
+                        "account",
+                        "entries",
+                        "seconds",
+                        "hours",
+                    ),
+                    (
+                        "2026-03-11",
+                        "2026-03",
+                        "PRJ-1",
+                        "Summary",
+                        "Alice",
+                        "alice-1",
+                        2,
+                        3600,
+                        1.0,
+                    ),
+                    (
+                        "VISIBLE_TOTALS",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "=SUBTOTAL(109,G2:G2)",
+                        "=SUBTOTAL(109,H2:H2)",
+                        "=SUBTOTAL(109,I2:I2)",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    publisher.publish(request)
+
+    formatting_requests = service.spreadsheets_api.batch_updates[-1]["requests"]
+    assert isinstance(formatting_requests, list)
+    repeat_cell_requests = [
+        request_item["repeatCell"]
+        for request_item in formatting_requests
+        if "repeatCell" in request_item
+    ]
+    assert any(
+        item["cell"]["userEnteredFormat"]
+        .get("numberFormat", {})
+        .get("pattern")
+        == "0.00"
+        for item in repeat_cell_requests
+    )

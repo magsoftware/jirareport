@@ -17,6 +17,7 @@ from jirareport.application.spreadsheets import (
 from jirareport.domain.models import (
     DailyRawSnapshot,
     DateRange,
+    JiraSpace,
     MonthId,
     MonthlyWorklogReport,
     TicketWorklogReport,
@@ -69,13 +70,13 @@ class DailySnapshotService:
         self,
         source: WorklogSource,
         storage: ReportStorage,
-        project_key: str,
+        space: JiraSpace,
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting dependencies."""
         self._source = source
         self._storage = storage
-        self._project_key = project_key
+        self._space = space
         self._timezone = ZoneInfo(timezone_name)
         self._timezone_name = timezone_name
 
@@ -93,7 +94,7 @@ class DailySnapshotService:
         generated_at = datetime.now(self._timezone)
         worklogs = _sort_worklogs(self._source.fetch_worklogs(window))
         snapshot = DailyRawSnapshot(
-            project_key=self._project_key,
+            space=self._space,
             snapshot_date=reference_date,
             window=window,
             generated_at=generated_at,
@@ -101,7 +102,7 @@ class DailySnapshotService:
             worklogs=tuple(worklogs),
         )
         snapshot_path = self._storage.write_json(
-            _daily_snapshot_path(reference_date),
+            _daily_snapshot_path(self._space, reference_date),
             serialize_daily_snapshot(snapshot),
         )
         monthly_paths = self._write_monthly_reports(worklogs, window, generated_at)
@@ -119,13 +120,13 @@ class DailySnapshotService:
         for month in months_in_range(window):
             report = _build_monthly_report(
                 worklogs,
-                self._project_key,
+                self._space,
                 month,
                 generated_at,
                 self._timezone_name,
             )
             path = self._storage.write_json(
-                _monthly_report_path(month),
+                _monthly_report_path(self._space, month),
                 serialize_monthly_report(report),
             )
             paths.append(path)
@@ -139,13 +140,13 @@ class MonthlyReportService:
         self,
         source: WorklogSource,
         storage: ReportStorage,
-        project_key: str,
+        space: JiraSpace,
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting dependencies."""
         self._source = source
         self._storage = storage
-        self._project_key = project_key
+        self._space = space
         self._timezone = ZoneInfo(timezone_name)
         self._timezone_name = timezone_name
 
@@ -156,13 +157,13 @@ class MonthlyReportService:
         worklogs = _sort_worklogs(self._source.fetch_worklogs(window))
         report = _build_monthly_report(
             worklogs,
-            self._project_key,
+            self._space,
             month,
             generated_at,
             self._timezone_name,
         )
         report_path = self._storage.write_json(
-            _monthly_report_path(month),
+            _monthly_report_path(self._space, month),
             serialize_monthly_report(report),
         )
         ticket_count = len(report.tickets)
@@ -177,14 +178,14 @@ class SheetsSyncService:
         source: WorklogSource,
         publisher: SpreadsheetPublisher,
         resolver: SpreadsheetResolver,
-        project_key: str,
+        space: JiraSpace,
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting and publishing ports."""
         self._source = source
         self._publisher = publisher
         self._resolver = resolver
-        self._project_key = project_key
+        self._space = space
         self._timezone = ZoneInfo(timezone_name)
         self._timezone_name = timezone_name
 
@@ -192,7 +193,7 @@ class SheetsSyncService:
         """Builds the current snapshot and publishes it to yearly spreadsheets."""
         snapshot = _build_daily_snapshot(
             self._source,
-            self._project_key,
+            self._space,
             reference_date,
             self._timezone,
             self._timezone_name,
@@ -221,7 +222,7 @@ class SheetsSyncService:
 
 def _build_monthly_report(
     worklogs: list[WorklogEntry],
-    project_key: str,
+    space: JiraSpace,
     month: MonthId,
     generated_at: datetime,
     timezone_name: str,
@@ -241,7 +242,7 @@ def _build_monthly_report(
         for issue_key, summary, entries in _sorted_tickets(tickets)
     )
     return MonthlyWorklogReport(
-        project_key=project_key,
+        space=space,
         month=month,
         generated_at=generated_at,
         timezone_name=timezone_name,
@@ -251,7 +252,7 @@ def _build_monthly_report(
 
 def _build_daily_snapshot(
     source: WorklogSource,
-    project_key: str,
+    space: JiraSpace,
     reference_date: date,
     timezone: ZoneInfo,
     timezone_name: str,
@@ -261,7 +262,7 @@ def _build_daily_snapshot(
     generated_at = datetime.now(timezone)
     worklogs = _sort_worklogs(source.fetch_worklogs(window))
     return DailyRawSnapshot(
-        project_key=project_key,
+        space=space,
         snapshot_date=reference_date,
         window=window,
         generated_at=generated_at,
@@ -291,11 +292,17 @@ def _sort_worklogs(worklogs: list[WorklogEntry]) -> list[WorklogEntry]:
 
 
 
-def _daily_snapshot_path(reference_date: date) -> str:
+def _daily_snapshot_path(space: JiraSpace, reference_date: date) -> str:
     """Builds the storage path for a raw daily snapshot."""
-    return f"raw/daily/{reference_date:%Y/%m/%Y-%m-%d}.json"
+    return (
+        f"spaces/{space.key}/{space.slug}/raw/daily/"
+        f"{reference_date:%Y/%m/%Y-%m-%d}.json"
+    )
 
 
-def _monthly_report_path(month: MonthId) -> str:
+def _monthly_report_path(space: JiraSpace, month: MonthId) -> str:
     """Builds the storage path for a derived monthly report."""
-    return f"derived/monthly/{month.year:04d}/{month.label()}.json"
+    return (
+        f"spaces/{space.key}/{space.slug}/derived/monthly/"
+        f"{month.year:04d}/{month.label()}.json"
+    )

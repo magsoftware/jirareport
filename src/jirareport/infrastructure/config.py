@@ -3,21 +3,23 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
+import yaml
 from dotenv import load_dotenv
+
+from jirareport.domain.models import JiraSpace
 
 StorageBackend = Literal["gcs", "local"]
 
 
 @dataclass(frozen=True)
 class JiraSettings:
-    """Holds Jira API configuration required by the report source."""
+    """Holds shared Jira API credentials used across all configured spaces."""
 
     base_url: str
     email: str
     api_token: str
-    project_key: str
 
 
 @dataclass(frozen=True)
@@ -32,19 +34,10 @@ class StorageSettings:
 
 @dataclass(frozen=True)
 class SheetsSettings:
-    """Holds configuration for yearly Google Sheets publishing."""
+    """Holds global Google Sheets publishing configuration."""
 
     enabled: bool
-    spreadsheet_ids: dict[int, str]
     title_prefix: str
-
-    def spreadsheet_id_for_year(self, year: int) -> str:
-        """Returns the configured spreadsheet ID for the requested year."""
-        try:
-            return self.spreadsheet_ids[year]
-        except KeyError as exc:
-            message = f"Missing Google Sheets spreadsheet ID for year {year}."
-            raise ValueError(message) from exc
 
 
 @dataclass(frozen=True)
@@ -52,6 +45,7 @@ class AppSettings:
     """Represents the full application configuration."""
 
     jira: JiraSettings
+    spaces: tuple[JiraSpace, ...]
     storage: StorageSettings
     sheets: SheetsSettings
     timezone_name: str
@@ -64,8 +58,8 @@ def load_settings() -> AppSettings:
         base_url=_required_env("JIRA_BASE_URL").rstrip("/"),
         email=_required_env("JIRA_EMAIL"),
         api_token=_required_env("JIRA_API_TOKEN"),
-        project_key=os.getenv("JIRA_PROJECT_KEY", "LA004832"),
     )
+    spaces = _load_spaces()
     backend = _storage_backend_from_env()
     storage = StorageSettings(
         backend=backend,
@@ -73,15 +67,14 @@ def load_settings() -> AppSettings:
         bucket_name=_bucket_name_for_backend(backend),
         bucket_prefix=os.getenv("GCS_BUCKET_PREFIX", "jirareport"),
     )
-    sheet_ids = _sheet_ids_from_env()
     sheets = SheetsSettings(
-        enabled=_sheets_enabled_from_env(sheet_ids),
-        spreadsheet_ids=sheet_ids,
+        enabled=_sheets_enabled_from_env(spaces),
         title_prefix=os.getenv("GOOGLE_SHEETS_TITLE_PREFIX", "Jira Worklog Analytics"),
     )
     timezone_name = os.getenv("REPORT_TIMEZONE", "Europe/Warsaw")
     return AppSettings(
         jira=jira,
+        spaces=spaces,
         storage=storage,
         sheets=sheets,
         timezone_name=timezone_name,
@@ -97,12 +90,7 @@ def _required_env(name: str) -> str:
 
 
 def _storage_backend_from_env() -> StorageBackend:
-    """Determines the storage backend from configuration.
-
-    An explicit backend wins. If no backend is provided, the function defaults
-    to GCS when a bucket name is configured and otherwise falls back to local
-    storage.
-    """
+    """Determines the storage backend from configuration."""
     backend_value = os.getenv("REPORT_STORAGE_BACKEND")
     if backend_value in {None, ""}:
         return "gcs" if os.getenv("GCS_BUCKET_NAME") else "local"
@@ -118,23 +106,104 @@ def _bucket_name_for_backend(backend: StorageBackend) -> str | None:
     return _required_env("GCS_BUCKET_NAME")
 
 
-def _sheet_ids_from_env() -> dict[int, str]:
-    """Loads configured yearly spreadsheet IDs from environment variables."""
+def _load_spaces() -> tuple[JiraSpace, ...]:
+    """Loads reporting spaces from the YAML configuration file."""
+    config_path = Path(os.getenv("JIRA_SPACES_CONFIG_PATH", "config/spaces.yaml"))
+    payload = _load_yaml_mapping(config_path)
+    raw_spaces = payload.get("spaces")
+    if not isinstance(raw_spaces, list) or not raw_spaces:
+        raise ValueError("Spaces configuration must define a non-empty 'spaces' list.")
+    spaces = tuple(_parse_space(item) for item in raw_spaces)
+    _validate_unique_space_values(spaces)
+    return spaces
+
+
+def _load_yaml_mapping(path: Path) -> dict[str, Any]:
+    """Loads a YAML file and validates that it contains a top-level mapping."""
+    if not path.exists():
+        raise ValueError(f"Missing spaces configuration file: {path}")
+    with path.open(encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError("Spaces configuration must be a YAML mapping.")
+    return cast(dict[str, Any], payload)
+
+
+def _parse_space(raw: Any) -> JiraSpace:
+    """Parses one configured reporting space from YAML data."""
+    if not isinstance(raw, dict):
+        raise ValueError("Each space configuration entry must be a mapping.")
+    key = _required_mapping_string(raw, "key")
+    name = _required_mapping_string(raw, "name")
+    slug = _required_mapping_string(raw, "slug")
+    board_id = _optional_mapping_int(raw, "board_id")
+    google_sheets_ids = _parse_sheet_ids(raw.get("google_sheets_ids"))
+    return JiraSpace(
+        key=key,
+        name=name,
+        slug=slug,
+        board_id=board_id,
+        google_sheets_ids=google_sheets_ids,
+    )
+
+
+def _required_mapping_string(raw: dict[str, Any], key: str) -> str:
+    """Returns a required non-empty string from a config mapping."""
+    value = raw.get(key)
+    if not isinstance(value, str) or not value.strip():
+        message = f"Space configuration field '{key}' must be a non-empty string."
+        raise ValueError(message)
+    return value.strip()
+
+
+def _optional_mapping_int(raw: dict[str, Any], key: str) -> int | None:
+    """Returns an optional integer from a config mapping."""
+    value = raw.get(key)
+    if value in {None, ""}:
+        return None
+    if not isinstance(value, int):
+        raise ValueError(f"Space configuration field '{key}' must be an integer.")
+    return value
+
+
+def _parse_sheet_ids(raw: Any) -> dict[int, str] | None:
+    """Parses per-year spreadsheet IDs from a config mapping."""
+    if raw is None or raw == "":
+        return None
+    if not isinstance(raw, dict):
+        message = "'google_sheets_ids' must be a mapping of year to spreadsheet ID."
+        raise ValueError(message)
     result: dict[int, str] = {}
-    prefix = "GOOGLE_SHEETS_ID_"
-    for name, value in os.environ.items():
-        if not name.startswith(prefix) or not value:
-            continue
-        year = int(name.removeprefix(prefix))
-        result[year] = value
+    for year, spreadsheet_id in raw.items():
+        if not isinstance(year, int):
+            raise ValueError("Google Sheets year keys must be integers.")
+        if not isinstance(spreadsheet_id, str) or not spreadsheet_id.strip():
+            raise ValueError("Google Sheets spreadsheet IDs must be non-empty strings.")
+        result[year] = spreadsheet_id.strip()
     return result
 
 
-def _sheets_enabled_from_env(sheet_ids: dict[int, str]) -> bool:
+def _validate_unique_space_values(spaces: tuple[JiraSpace, ...]) -> None:
+    """Validates that configured spaces do not reuse key or slug values."""
+    _validate_unique_attribute(spaces, "key")
+    _validate_unique_attribute(spaces, "slug")
+
+
+def _validate_unique_attribute(spaces: tuple[JiraSpace, ...], attribute: str) -> None:
+    """Ensures one string attribute remains unique across configured spaces."""
+    seen: set[str] = set()
+    for space in spaces:
+        value = getattr(space, attribute)
+        if value in seen:
+            raise ValueError(f"Duplicate Jira space {attribute}: {value}")
+        seen.add(value)
+
+
+def _sheets_enabled_from_env(spaces: tuple[JiraSpace, ...]) -> bool:
     """Determines whether Google Sheets publishing is enabled."""
     raw_value = os.getenv("GOOGLE_SHEETS_ENABLED")
     if raw_value in {None, ""}:
-        return bool(sheet_ids)
+        return any(space.safe_google_sheets_ids for space in spaces)
     assert raw_value is not None
     normalized = raw_value.lower().strip()
     if normalized in {"1", "true", "yes", "on"}:

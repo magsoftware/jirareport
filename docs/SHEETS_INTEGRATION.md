@@ -435,30 +435,38 @@ Current model:
 
 ## 9.1. Required Variables
 
-The following configuration variables are required for Google Sheets
+The following configuration inputs are required for Google Sheets
 integration:
 
 - `GOOGLE_SHEETS_ENABLED`
-- `GOOGLE_SHEETS_ID_2025`
-- `GOOGLE_SHEETS_ID_2026`
+- `GOOGLE_SHEETS_TITLE_PREFIX`
+- `config/spaces.yaml`
 
 At minimum, the application needs a way to resolve:
 - whether Sheets publishing is enabled,
-- which spreadsheet ID belongs to which year.
+- which spreadsheet ID belongs to which space and year.
 
 ## 9.2. Recommended Variable Naming
 
-Because the system is designed around yearly spreadsheets, the recommended
-approach is:
+Because the system is designed around yearly spreadsheets and multiple Jira
+spaces, the implemented approach is:
 
-```dotenv
-GOOGLE_SHEETS_ENABLED=true
-GOOGLE_SHEETS_ID_2025=<spreadsheet-id>
-GOOGLE_SHEETS_ID_2026=<spreadsheet-id>
-GOOGLE_SHEETS_ID_2027=<spreadsheet-id>
+```yaml
+spaces:
+  - key: LA004832
+    name: Click Price
+    slug: click-price
+    google_sheets_ids:
+      2026: <spreadsheet-id>
+
+  - key: LA009644
+    name: Data Fixer
+    slug: data-fixer
+    google_sheets_ids:
+      2026: <spreadsheet-id>
 ```
 
-This keeps resolution explicit and avoids runtime ambiguity.
+This keeps resolution explicit and avoids runtime ambiguity between spaces.
 
 ## 9.3. Authentication
 

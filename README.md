@@ -37,14 +37,32 @@ cp .env.example .env
 JIRA_BASE_URL=https://twoja-firma.atlassian.net
 JIRA_EMAIL=twoj.email@firma.pl
 JIRA_API_TOKEN=twoj_token_api
-JIRA_PROJECT_KEY=LA004832
 REPORT_TIMEZONE=Europe/Warsaw
+JIRA_SPACES_CONFIG_PATH=config/spaces.yaml
 
 REPORT_STORAGE_BACKEND=local
 REPORT_OUTPUT_DIR=reports
 ```
 
-4. Uruchom raport:
+4. Skonfiguruj przestrzenie raportowe w [config/spaces.yaml](config/spaces.yaml):
+
+```yaml
+spaces:
+  - key: LA004832
+    name: Click Price
+    slug: click-price
+    google_sheets_ids:
+      2026: click-price-sheet-id
+
+  - key: LA009644
+    name: Data Fixer
+    slug: data-fixer
+    board_id: 1354
+    google_sheets_ids:
+      2026: data-fixer-sheet-id
+```
+
+5. Uruchom raport:
 
 ```bash
 uv run jirareport daily --date 2026-03-11
@@ -71,6 +89,8 @@ Zasady:
 - `daily` zapisuje raw snapshot i odswieza wszystkie miesiace z `rolling_window`
 - `monthly` generuje pojedynczy raport miesieczny
 - `sync sheets` publikuje snapshot do Google Sheets
+- bez `--space` komendy dzialaja dla wszystkich przestrzeni z `config/spaces.yaml`
+- `--space` przyjmuje `key` albo `slug`, np. `LA009644` albo `data-fixer`
 
 ## Google Sheets
 
@@ -80,11 +100,10 @@ Wymagane zmienne lokalne:
 GOOGLE_APPLICATION_CREDENTIALS=/sciezka/do/service-account.json
 GOOGLE_SHEETS_ENABLED=true
 GOOGLE_SHEETS_TITLE_PREFIX=Jira Worklog Analytics
-GOOGLE_SHEETS_ID_2026=twoj_spreadsheet_id
 ```
 
 Zachowanie:
-- jesli istnieje `GOOGLE_SHEETS_ID_<YEAR>`, dane trafiaja do wskazanego arkusza
+- identyfikatory spreadsheetow sa mapowane per przestrzen i rok w `config/spaces.yaml`
 - jesli brakuje ID dla roku, aplikacja utworzy nowy spreadsheet i zaloguje jego URL
 - zakladki:
   - `raw_worklogs`

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from jirareport.domain.models import WorklogEntry
+from jirareport.domain.models import JiraSpace, WorklogEntry
 
 
 @pytest.fixture
@@ -41,3 +41,23 @@ def make_worklog(
         )
 
     return _make_worklog
+
+
+@pytest.fixture
+def make_space() -> Callable[..., JiraSpace]:
+    def _make_space(
+        key: str = "PRJ",
+        name: str = "Project",
+        slug: str = "project",
+        board_id: int | None = None,
+        google_sheets_ids: dict[int, str] | None = None,
+    ) -> JiraSpace:
+        return JiraSpace(
+            key=key,
+            name=name,
+            slug=slug,
+            board_id=board_id,
+            google_sheets_ids=google_sheets_ids,
+        )
+
+    return _make_space

@@ -4,6 +4,7 @@ from datetime import datetime
 
 from jirareport.domain.models import (
     DailyRawSnapshot,
+    JiraSpace,
     MonthlyWorklogReport,
     WorklogEntry,
 )
@@ -59,6 +60,7 @@ def serialize_daily_snapshot(snapshot: DailyRawSnapshot) -> dict[str, object]:
     return {
         "report_type": "daily_raw_snapshot",
         "project_key": snapshot.project_key,
+        "space": serialize_space(snapshot.space),
         "snapshot_date": snapshot_date,
         "window_start": snapshot.window.start.isoformat(),
         "window_end": snapshot.window.end.isoformat(),
@@ -90,10 +92,21 @@ def serialize_monthly_report(report: MonthlyWorklogReport) -> dict[str, object]:
     return {
         "report_type": "monthly_worklogs",
         "project_key": report.project_key,
+        "space": serialize_space(report.space),
         "month": report.month.label(),
         "generated_at": _format_datetime(report.generated_at),
         "timezone": report.timezone_name,
         "tickets": tickets,
+    }
+
+
+def serialize_space(space: JiraSpace) -> dict[str, object]:
+    """Serializes Jira space metadata for JSON report payloads."""
+    return {
+        "key": space.key,
+        "name": space.name,
+        "slug": space.slug,
+        "board_id": space.board_id,
     }
 
 

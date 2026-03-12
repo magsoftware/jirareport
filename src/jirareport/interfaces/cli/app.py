@@ -11,7 +11,7 @@ from jirareport.application.services import (
     MonthlyReportService,
     SheetsSyncService,
 )
-from jirareport.domain.models import MonthId
+from jirareport.domain.models import JiraSpace, MonthId
 from jirareport.domain.ports import (
     ReportStorage,
     SpreadsheetPublisher,
@@ -36,17 +36,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args.debug)
     settings = load_settings()
     if args.command == "daily":
-        source = _build_source(settings)
         storage = _build_storage(settings)
-        return _run_daily(args.date, settings, source, storage)
+        return _run_daily(args.date, args.space, settings, storage)
     if args.command == "monthly":
-        source = _build_source(settings)
         storage = _build_storage(settings)
-        return _run_monthly(args.month, settings, source, storage)
-    source = _build_source(settings)
+        return _run_monthly(args.month, args.space, settings, storage)
     publisher = _build_spreadsheet_publisher(settings)
-    resolver = _build_spreadsheet_resolver(settings)
-    return _run_sync_sheets(args.date, settings, source, publisher, resolver)
+    return _run_sync_sheets(args.date, args.space, settings, publisher)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -95,6 +91,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "Defaults to the current date in REPORT_TIMEZONE."
         ),
     )
+    daily.add_argument(
+        "--space",
+        type=str,
+        help="Optional Jira space key or slug. Defaults to all configured spaces.",
+    )
     monthly = subparsers.add_parser(
         "monthly",
         help="Generate a derived report for a single target month.",
@@ -110,6 +111,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "Target month in YYYY-MM format. "
             "Defaults to the current month in REPORT_TIMEZONE."
         ),
+    )
+    monthly.add_argument(
+        "--space",
+        type=str,
+        help="Optional Jira space key or slug. Defaults to all configured spaces.",
     )
     sync = subparsers.add_parser(
         "sync",
@@ -137,17 +143,22 @@ def _build_parser() -> argparse.ArgumentParser:
             "Defaults to the current date in REPORT_TIMEZONE."
         ),
     )
+    sheets.add_argument(
+        "--space",
+        type=str,
+        help="Optional Jira space key or slug. Defaults to all configured spaces.",
+    )
     return parser
 
 
-def _build_source(settings: AppSettings) -> WorklogSource:
+def _build_source(settings: AppSettings, space: JiraSpace) -> WorklogSource:
     """Builds the configured worklog source adapter."""
     jira = settings.jira
     return JiraWorklogSource(
         base_url=jira.base_url,
         email=jira.email,
         api_token=jira.api_token,
-        project_key=jira.project_key,
+        project_key=space.key,
         timezone_name=settings.timezone_name,
     )
 
@@ -169,20 +180,23 @@ def _build_spreadsheet_publisher(settings: AppSettings) -> SpreadsheetPublisher:
     return GoogleSheetsPublisher()
 
 
-def _build_spreadsheet_resolver(settings: AppSettings) -> SpreadsheetResolver:
+def _build_spreadsheet_resolver(
+    settings: AppSettings,
+    space: JiraSpace,
+) -> SpreadsheetResolver:
     """Builds the configured yearly spreadsheet resolver."""
     if not settings.sheets.enabled:
         raise ValueError("Google Sheets publishing is disabled.")
     return GoogleSheetsResolver(
-        spreadsheet_ids=dict(settings.sheets.spreadsheet_ids),
-        title_prefix=settings.sheets.title_prefix,
+        spreadsheet_ids=dict(space.safe_google_sheets_ids),
+        title_prefix=f"{settings.sheets.title_prefix} - {space.name}",
     )
 
 
 def _run_daily(
     input_date: str | None,
+    space_selector: str | None,
     settings: AppSettings,
-    source: WorklogSource,
     storage: ReportStorage,
 ) -> int:
     """Runs the main daily use case.
@@ -195,21 +209,27 @@ def _run_daily(
         reference_date = date.fromisoformat(input_date)
     else:
         reference_date = current_date(settings.timezone_name)
-    service = DailySnapshotService(
-        source=source,
-        storage=storage,
-        project_key=settings.jira.project_key,
-        timezone_name=settings.timezone_name,
-    )
-    result = service.generate(reference_date)
-    logger.info("Daily snapshot saved to {}", result.snapshot_path)
+    for space in _selected_spaces(settings, space_selector):
+        source = _build_source(settings, space)
+        service = DailySnapshotService(
+            source=source,
+            storage=storage,
+            space=space,
+            timezone_name=settings.timezone_name,
+        )
+        result = service.generate(reference_date)
+        logger.info(
+            "Daily snapshot for {} saved to {}",
+            space.slug,
+            result.snapshot_path,
+        )
     return 0
 
 
 def _run_monthly(
     input_month: str | None,
+    space_selector: str | None,
     settings: AppSettings,
-    source: WorklogSource,
     storage: ReportStorage,
 ) -> int:
     """Runs the ad hoc monthly report generation use case."""
@@ -217,39 +237,61 @@ def _run_monthly(
         month = MonthId.parse(input_month)
     else:
         month = MonthId.from_date(current_date(settings.timezone_name))
-    service = MonthlyReportService(
-        source=source,
-        storage=storage,
-        project_key=settings.jira.project_key,
-        timezone_name=settings.timezone_name,
-    )
-    result = service.generate(month)
-    logger.info("Monthly report saved to {}", result.report_path)
+    for space in _selected_spaces(settings, space_selector):
+        source = _build_source(settings, space)
+        service = MonthlyReportService(
+            source=source,
+            storage=storage,
+            space=space,
+            timezone_name=settings.timezone_name,
+        )
+        result = service.generate(month)
+        logger.info(
+            "Monthly report for {} saved to {}",
+            space.slug,
+            result.report_path,
+        )
     return 0
 
 
 def _run_sync_sheets(
     input_date: str | None,
+    space_selector: str | None,
     settings: AppSettings,
-    source: WorklogSource,
     publisher: SpreadsheetPublisher,
-    resolver: SpreadsheetResolver,
 ) -> int:
     """Runs the Google Sheets synchronization use case."""
     if input_date:
         reference_date = date.fromisoformat(input_date)
     else:
         reference_date = current_date(settings.timezone_name)
-    service = SheetsSyncService(
-        source=source,
-        publisher=publisher,
-        resolver=resolver,
-        project_key=settings.jira.project_key,
-        timezone_name=settings.timezone_name,
-    )
-    result = service.generate(reference_date)
-    logger.info(
-        "Published Google Sheets sync to {}",
-        ", ".join(result.spreadsheet_urls),
-    )
+    for space in _selected_spaces(settings, space_selector):
+        source = _build_source(settings, space)
+        resolver = _build_spreadsheet_resolver(settings, space)
+        service = SheetsSyncService(
+            source=source,
+            publisher=publisher,
+            resolver=resolver,
+            space=space,
+            timezone_name=settings.timezone_name,
+        )
+        result = service.generate(reference_date)
+        logger.info(
+            "Published Google Sheets sync for {} to {}",
+            space.slug,
+            ", ".join(result.spreadsheet_urls),
+        )
     return 0
+
+
+def _selected_spaces(
+    settings: AppSettings,
+    selector: str | None,
+) -> tuple[JiraSpace, ...]:
+    """Returns either all configured spaces or one selected by key/slug."""
+    if selector in {None, ""}:
+        return settings.spaces
+    for space in settings.spaces:
+        if selector in {space.key, space.slug}:
+            return (space,)
+    raise ValueError(f"Unknown Jira space selector: {selector}")

@@ -1,0 +1,13 @@
+spaces:
+  - key: LA004832
+    name: Click Price
+    slug: click-price
+    google_sheets_ids:
+      2026: 1aK0MF9lducLJ7vrqHGN-B5IsOUZstAiUN-cr59DJuwk
+
+  - key: LA009644
+    name: Data Fixer
+    slug: data-fixer
+    board_id: 1354
+    google_sheets_ids:
+      2026: 1DC-Kx-7_qBqPOoe7JzPlNlGQ6plwk-EUqMLkdUYFj80

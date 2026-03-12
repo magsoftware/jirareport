@@ -58,6 +58,9 @@ DAILY_HEADERS = (
     "total_hours",
 )
 METADATA_HEADERS = (
+    "space_key",
+    "space_name",
+    "space_slug",
     "spreadsheet_year",
     "last_run_at",
     "source_snapshot_date",
@@ -276,6 +279,9 @@ def _build_metadata_rows(
 ) -> tuple[tuple[SheetCellValue, ...], ...]:
     """Builds the metadata tab rows for one yearly spreadsheet."""
     row = (
+        snapshot.space.key,
+        snapshot.space.name,
+        snapshot.space.slug,
         year,
         snapshot.generated_at.isoformat(timespec="seconds"),
         snapshot.snapshot_date.isoformat(),

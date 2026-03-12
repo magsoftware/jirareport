@@ -11,10 +11,12 @@ from jirareport.infrastructure.jira_client import (
     JiraWorklogSource,
     RequestParams,
     _build_session,
+    _coerce_int,
     _optional_string,
     _parse_issues,
     _parse_jira_datetime,
     _parse_worklogs,
+    _payload_optional_int,
 )
 
 
@@ -78,6 +80,39 @@ def test_request_json_rejects_non_dict_payload() -> None:
 
     with pytest.raises(ValueError, match="Unexpected Jira response payload"):
         source._request_json("/rest/api/3/search/jql")
+
+
+def test_search_issues_falls_back_to_short_page_without_total() -> None:
+    source = JiraWorklogSource(
+        base_url="https://example.atlassian.net",
+        email="user@example.com",
+        api_token="secret",
+        project_key="PRJ",
+        timezone_name="Europe/Warsaw",
+        session=_PayloadSession(
+            [
+                {
+                    "issues": [
+                        {"key": "PRJ-1", "fields": {"summary": "Summary 1"}},
+                        {"key": "PRJ-2", "fields": {"summary": "Summary 2"}},
+                    ]
+                }
+            ]
+        ),
+    )
+
+    issues = source._search_issues(
+        DateRange(start=date(2026, 3, 1), end=date(2026, 3, 31))
+    )
+
+    assert [issue.key for issue in issues] == ["PRJ-1", "PRJ-2"]
+
+
+def test_payload_optional_int_and_coerce_int_handle_strings() -> None:
+    assert _payload_optional_int({"total": "123"}, "total") == 123
+    assert _payload_optional_int({"total": "x"}, "total") is None
+    assert _coerce_int("42") == 42
+    assert _coerce_int(object()) == 0
 
 
 class _Response:
