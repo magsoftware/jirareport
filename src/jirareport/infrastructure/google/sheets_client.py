@@ -194,6 +194,7 @@ def _format_worksheet(
     column_count = len(worksheet.rows[0]) if worksheet.rows else 0
     row_count = len(worksheet.rows)
     requests = [
+        _reset_formatting_request(sheet_id, row_count, column_count),
         _freeze_header_request(sheet_id),
         _header_format_request(sheet_id, column_count),
         _auto_resize_request(sheet_id, column_count),
@@ -208,6 +209,45 @@ def _format_worksheet(
         spreadsheetId=spreadsheet_id,
         body={"requests": requests},
     ).execute()
+
+
+def _reset_formatting_request(
+    sheet_id: int,
+    row_count: int,
+    column_count: int,
+) -> dict[str, object]:
+    """Clears formatting in the populated worksheet area before reapplying styles."""
+    return {
+        "repeatCell": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 0,
+                "endRowIndex": max(row_count, 1),
+                "startColumnIndex": 0,
+                "endColumnIndex": column_count,
+            },
+            "cell": {
+                "userEnteredFormat": {
+                    "backgroundColor": {"red": 1, "green": 1, "blue": 1},
+                    "textFormat": {
+                        "bold": False,
+                        "italic": False,
+                        "strikethrough": False,
+                        "underline": False,
+                    },
+                }
+            },
+            "fields": (
+                "userEnteredFormat("
+                "backgroundColor,"
+                "textFormat.bold,"
+                "textFormat.italic,"
+                "textFormat.strikethrough,"
+                "textFormat.underline"
+                ")"
+            ),
+        }
+    }
 
 
 def _freeze_header_request(sheet_id: int) -> dict[str, object]:
