@@ -11,12 +11,14 @@ from jirareport.infrastructure.logging_config import (
     MAX_LOC_LENGTH,
     _format_location,
     configure_logging,
+    flush_logging,
 )
 
 
 def test_configure_logging_runs_for_debug_and_info_levels() -> None:
     configure_logging(debug=False)
     configure_logging(debug=True)
+    flush_logging()
 
 
 def test_format_location_populates_and_truncates_extra_field() -> None:

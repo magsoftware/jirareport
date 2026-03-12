@@ -32,6 +32,11 @@ def configure_logging(debug: bool) -> None:
     logger.info("Logging initialized with custom format and location handler")
 
 
+def flush_logging() -> None:
+    """Waits until all queued log messages are written to configured sinks."""
+    logger.complete()
+
+
 def _format_location(record: Any) -> bool:
     """Formats the ``location`` field used by the log output template.
 

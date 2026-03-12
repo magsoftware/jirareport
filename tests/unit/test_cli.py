@@ -85,6 +85,7 @@ def test_main_dispatches_daily_command(
     fake_daily = FakeDailyService(None, None, settings.spaces[0], "Europe/Warsaw")
     monkeypatch.setattr(app, "load_settings", lambda: settings)
     monkeypatch.setattr(app, "configure_logging", lambda debug: None)
+    monkeypatch.setattr(app, "flush_logging", lambda: None)
     monkeypatch.setattr(app, "_build_source", lambda settings, space: object())
     monkeypatch.setattr(app, "_build_storage", lambda settings: object())
     monkeypatch.setattr(app, "DailySnapshotService", lambda *args, **kwargs: fake_daily)
@@ -103,6 +104,7 @@ def test_main_dispatches_monthly_command(
     fake_monthly = FakeMonthlyService(None, None, settings.spaces[0], "Europe/Warsaw")
     monkeypatch.setattr(app, "load_settings", lambda: settings)
     monkeypatch.setattr(app, "configure_logging", lambda debug: None)
+    monkeypatch.setattr(app, "flush_logging", lambda: None)
     monkeypatch.setattr(app, "_build_source", lambda settings, space: object())
     monkeypatch.setattr(app, "_build_storage", lambda settings: object())
     monkeypatch.setattr(
@@ -132,6 +134,7 @@ def test_main_dispatches_sync_sheets_command(
     )
     monkeypatch.setattr(app, "load_settings", lambda: settings)
     monkeypatch.setattr(app, "configure_logging", lambda debug: None)
+    monkeypatch.setattr(app, "flush_logging", lambda: None)
     monkeypatch.setattr(app, "_build_source", lambda settings, space: object())
     monkeypatch.setattr(app, "_build_spreadsheet_publisher", lambda settings: object())
     monkeypatch.setattr(

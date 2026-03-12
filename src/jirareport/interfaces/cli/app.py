@@ -25,7 +25,7 @@ from jirareport.infrastructure.google.sheets_client import (
     GoogleSheetsResolver,
 )
 from jirareport.infrastructure.jira_client import JiraWorklogSource
-from jirareport.infrastructure.logging_config import configure_logging
+from jirareport.infrastructure.logging_config import configure_logging, flush_logging
 from jirareport.infrastructure.storage import build_storage
 
 
@@ -34,15 +34,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     configure_logging(args.debug)
-    settings = load_settings()
-    if args.command == "daily":
-        storage = _build_storage(settings)
-        return _run_daily(args.date, args.space, settings, storage)
-    if args.command == "monthly":
-        storage = _build_storage(settings)
-        return _run_monthly(args.month, args.space, settings, storage)
-    publisher = _build_spreadsheet_publisher(settings)
-    return _run_sync_sheets(args.date, args.space, settings, publisher)
+    try:
+        settings = load_settings()
+        if args.command == "daily":
+            storage = _build_storage(settings)
+            return _run_daily(args.date, args.space, settings, storage)
+        if args.command == "monthly":
+            storage = _build_storage(settings)
+            return _run_monthly(args.month, args.space, settings, storage)
+        publisher = _build_spreadsheet_publisher(settings)
+        return _run_sync_sheets(args.date, args.space, settings, publisher)
+    finally:
+        flush_logging()
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -223,6 +226,8 @@ def _run_daily(
             space.slug,
             result.snapshot_path,
         )
+    logger.info("Completed daily snapshot command.")
+    flush_logging()
     return 0
 
 
@@ -251,6 +256,8 @@ def _run_monthly(
             space.slug,
             result.report_path,
         )
+    logger.info("Completed monthly report command.")
+    flush_logging()
     return 0
 
 
@@ -281,6 +288,8 @@ def _run_sync_sheets(
             space.slug,
             ", ".join(result.spreadsheet_urls),
         )
+    logger.info("Completed Google Sheets sync command.")
+    flush_logging()
     return 0
 
 
