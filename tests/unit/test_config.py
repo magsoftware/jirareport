@@ -11,7 +11,7 @@ from jirareport.infrastructure.config import load_settings
 @pytest.fixture(autouse=True)
 def clear_google_sheets_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Removes local Google Sheets settings so tests stay environment-independent."""
-    monkeypatch.delenv("GOOGLE_SHEETS_ENABLED", raising=False)
+    monkeypatch.setenv("GOOGLE_SHEETS_ENABLED", "")
     monkeypatch.delenv("JIRA_SPACES_CONFIG_PATH", raising=False)
     for name in tuple(os.environ):
         if name.startswith("GOOGLE_SHEETS_ID_"):
