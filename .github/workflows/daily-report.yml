@@ -2,7 +2,7 @@ name: Daily Report
 
 on:
   schedule:
-    - cron: "17 5 * * *"
+    - cron: "5 1 * * *"
   workflow_dispatch:
     inputs:
       report_date:
@@ -14,19 +14,26 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: daily-report-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   generate-daily-report:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     env:
       JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
       JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-      JIRA_PROJECT_KEY: ${{ vars.JIRA_PROJECT_KEY || 'LA004832' }}
+      JIRA_SPACES_CONFIG_PATH: config/spaces.yaml
       REPORT_TIMEZONE: ${{ vars.REPORT_TIMEZONE || 'Europe/Warsaw' }}
       REPORT_STORAGE_BACKEND: gcs
       GCS_BUCKET_NAME: ${{ vars.GCS_BUCKET_NAME }}
       GCS_BUCKET_PREFIX: ${{ vars.GCS_BUCKET_PREFIX || 'jirareport' }}
+      GOOGLE_SHEETS_ENABLED: "true"
+      GOOGLE_SHEETS_TITLE_PREFIX: ${{ vars.GOOGLE_SHEETS_TITLE_PREFIX || 'Jira Worklog Analytics' }}
 
     steps:
       - name: Checkout repository
@@ -41,10 +48,11 @@ jobs:
           python-version: "3.13"
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          project_id: jira-report-489919
 
       - name: Sync dependencies
         run: uv sync --group dev
@@ -55,4 +63,12 @@ jobs:
             uv run jirareport daily --date "${{ github.event.inputs.report_date }}"
           else
             uv run jirareport daily
+          fi
+
+      - name: Sync Google Sheets
+        run: |
+          if [ -n "${{ github.event.inputs.report_date }}" ]; then
+            uv run jirareport sync sheets --date "${{ github.event.inputs.report_date }}"
+          else
+            uv run jirareport sync sheets
           fi
