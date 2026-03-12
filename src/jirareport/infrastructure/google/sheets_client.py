@@ -27,6 +27,11 @@ class GoogleSheetsPublisher:
     def publish(self, request: SpreadsheetPublishRequest) -> str:
         """Publishes all managed tabs to the configured yearly spreadsheet."""
         service = self._service_factory()
+        logger.info(
+            "Starting publish to spreadsheet {} for year {}.",
+            request.spreadsheet_id,
+            request.year,
+        )
         sheet_ids, locale = self._ensure_worksheets(service, request)
         for worksheet in request.worksheets:
             _write_worksheet(service, request.spreadsheet_id, worksheet, locale)
@@ -37,11 +42,17 @@ class GoogleSheetsPublisher:
                 worksheet,
             )
             logger.info(
-                "Published {} row(s) to spreadsheet {} tab {}.",
+                "Published {} row(s) to spreadsheet {} year {} tab {}.",
                 len(worksheet.rows) - 1,
+                request.spreadsheet_id,
                 request.year,
                 worksheet.title,
             )
+        logger.info(
+            "Completed publish to spreadsheet {} for year {}.",
+            request.spreadsheet_id,
+            request.year,
+        )
         return _spreadsheet_url(request.spreadsheet_id)
 
     def _ensure_worksheets(

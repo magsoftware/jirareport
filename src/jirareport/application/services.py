@@ -191,6 +191,11 @@ class SheetsSyncService:
 
     def generate(self, reference_date: date) -> SpreadsheetSyncResult:
         """Builds the current snapshot and publishes it to yearly spreadsheets."""
+        logger.info(
+            "Starting Google Sheets sync for space {} and reference date {}.",
+            self._space.slug,
+            reference_date.isoformat(),
+        )
         snapshot = _build_daily_snapshot(
             self._source,
             self._space,
@@ -204,6 +209,10 @@ class SheetsSyncService:
             len(snapshot.worklogs),
             len(urls),
         )
+        logger.info(
+            "Completed Google Sheets sync for space {}.",
+            self._space.slug,
+        )
         return SpreadsheetSyncResult(tuple(urls), len(snapshot.worklogs))
 
     def _publish_yearly_requests(self, snapshot: DailyRawSnapshot) -> list[str]:
@@ -211,12 +220,23 @@ class SheetsSyncService:
         urls: list[str] = []
         for year in years_for_snapshot(snapshot):
             target = self._resolver.resolve(year)
+            logger.info(
+                "Publishing space {} to spreadsheet {} for year {}.",
+                self._space.slug,
+                target.spreadsheet_id,
+                year,
+            )
             request = build_spreadsheet_request(
                 snapshot=snapshot,
                 spreadsheet_id=target.spreadsheet_id,
                 year=year,
             )
             urls.append(self._publisher.publish(request))
+            logger.info(
+                "Completed spreadsheet publish for space {} year {}.",
+                self._space.slug,
+                year,
+            )
         return urls
 
 
