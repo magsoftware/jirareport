@@ -6,7 +6,10 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
-from jirareport.application.parquet_serializers import serialize_monthly_worklogs
+from jirareport.application.parquet_serializers import (
+    count_parquet_rows,
+    serialize_monthly_worklogs,
+)
 from jirareport.application.serializers import (
     serialize_daily_snapshot,
     serialize_monthly_report,
@@ -83,6 +86,7 @@ class BigQuerySyncResult:
     """Describes the output of the BigQuery synchronization use case."""
 
     months: tuple[MonthId, ...]
+    worklog_count: int
 
 
 class DailySnapshotService:
@@ -139,7 +143,12 @@ class DailySnapshotService:
             window,
             generated_at,
         )
-        logger.info("Generated snapshot with {} worklogs.", len(worklogs))
+        logger.info(
+            "Generated snapshot for space {} with {} worklogs across {} month(s).",
+            self._space.slug,
+            len(worklogs),
+            len(monthly_paths),
+        )
         return DailySnapshotResult(
             snapshot_path,
             monthly_paths,
@@ -341,9 +350,10 @@ class SheetsSyncService:
         )
         urls = self._publish_yearly_requests(snapshot)
         logger.info(
-            "Published {} worklogs to {} spreadsheet(s).",
+            "Published {} worklogs to {} spreadsheet(s) for space {}.",
             len(snapshot.worklogs),
             len(urls),
+            self._space.slug,
         )
         logger.info(
             "Completed Google Sheets sync for space {}.",
@@ -369,9 +379,13 @@ class SheetsSyncService:
         )
         urls = self._publish_yearly_requests(snapshot)
         logger.info(
-            "Published {} worklogs to {} spreadsheet(s) for explicit range.",
+            (
+                "Published {} worklogs to {} spreadsheet(s) "
+                "for explicit range in space {}."
+            ),
             len(snapshot.worklogs),
             len(urls),
+            self._space.slug,
         )
         logger.info(
             "Completed Google Sheets range sync for space {}.",
@@ -434,10 +448,12 @@ class BigQuerySyncService:
             self._space.slug,
             len(months),
         )
+        worklog_count = 0
         for month in months:
             payload = self._dataset_storage.read_bytes(
                 _monthly_worklogs_path(self._space, month)
             )
+            worklog_count += count_parquet_rows(payload)
             self._warehouse.load_monthly_worklogs(self._space, month, payload)
             logger.info(
                 "Loaded curated worklogs for space {} month {} into BigQuery.",
@@ -446,7 +462,7 @@ class BigQuerySyncService:
             )
         self._warehouse.ensure_views()
         logger.info("Completed BigQuery sync for space {}.", self._space.slug)
-        return BigQuerySyncResult(months)
+        return BigQuerySyncResult(months, worklog_count)
 
 
 def _build_monthly_report(

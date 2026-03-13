@@ -4,6 +4,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+from jirareport.application.parquet_serializers import serialize_monthly_worklogs
 from jirareport.application.services import (
     BackfillService,
     BigQuerySyncService,
@@ -403,20 +404,48 @@ def test_sync_sheets_range_builds_monthly_tabs_for_explicit_window(
 
 
 def test_bigquery_sync_loads_active_months_from_curated_storage(
+    make_worklog: Callable[..., WorklogEntry],
     make_space: Callable[..., JiraSpace],
 ) -> None:
     storage = FakeStorage()
+    space = make_space(key="PRJ", name="Project", slug="project")
     storage.binary_payloads[
         "curated/worklogs/space=project/year=2026/month=02/worklogs.parquet"
-    ] = b"feb"
+    ] = serialize_monthly_worklogs(
+        space,
+        MonthId(year=2026, month=2),
+        [
+            make_worklog(
+                "feb-1",
+                "PRJ-1",
+                "February work",
+                "Alice",
+                "2026-02-20T09:00:00+01:00",
+                3600,
+            )
+        ],
+    )
     storage.binary_payloads[
         "curated/worklogs/space=project/year=2026/month=03/worklogs.parquet"
-    ] = b"mar"
+    ] = serialize_monthly_worklogs(
+        space,
+        MonthId(year=2026, month=3),
+        [
+            make_worklog(
+                "mar-1",
+                "PRJ-2",
+                "March work",
+                "Bob",
+                "2026-03-10T09:00:00+01:00",
+                7200,
+            )
+        ],
+    )
     warehouse = FakeWorklogWarehouse()
     service = BigQuerySyncService(
         dataset_storage=storage,
         warehouse=warehouse,
-        space=make_space(key="PRJ", name="Project", slug="project"),
+        space=space,
     )
 
     result = service.generate(date(2026, 4, 1))
@@ -425,8 +454,21 @@ def test_bigquery_sync_loads_active_months_from_curated_storage(
         MonthId(year=2026, month=2),
         MonthId(year=2026, month=3),
     )
+    assert result.worklog_count == 2
     assert warehouse.loads == [
-        ("project", "2026-02", b"feb"),
-        ("project", "2026-03", b"mar"),
+        (
+            "project",
+            "2026-02",
+            storage.binary_payloads[
+                "curated/worklogs/space=project/year=2026/month=02/worklogs.parquet"
+            ],
+        ),
+        (
+            "project",
+            "2026-03",
+            storage.binary_payloads[
+                "curated/worklogs/space=project/year=2026/month=03/worklogs.parquet"
+            ],
+        ),
     ]
     assert warehouse.views_ensured is True

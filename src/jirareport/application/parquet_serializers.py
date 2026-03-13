@@ -48,6 +48,12 @@ def serialize_monthly_worklogs(
     return buffer.getvalue()
 
 
+def count_parquet_rows(payload: bytes) -> int:
+    """Returns the number of rows stored in a serialized Parquet payload."""
+    table = pq.read_table(BytesIO(payload))
+    return int(table.num_rows)
+
+
 def _monthly_worklog_row(
     space: JiraSpace,
     month: MonthId,

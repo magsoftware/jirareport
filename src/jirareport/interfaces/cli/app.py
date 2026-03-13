@@ -414,9 +414,14 @@ def _run_daily(
         )
         result = service.generate(reference_date)
         logger.info(
-            "Daily snapshot for {} saved to {}",
+            (
+                "Daily snapshot for {} saved to {} "
+                "with {} worklogs across {} curated month(s)."
+            ),
             space.slug,
             result.snapshot_path,
+            result.worklog_count,
+            len(result.curated_paths),
         )
     logger.info("Completed daily snapshot command.")
     flush_logging()
@@ -524,9 +529,10 @@ def _run_sync_sheets(
         else:
             result = service.generate_range(explicit_window)
         logger.info(
-            "Published Google Sheets sync for {} to {}",
+            "Published Google Sheets sync for {} to {} with {} worklogs.",
             space.slug,
             ", ".join(result.spreadsheet_urls),
+            result.worklog_count,
         )
     logger.info("Completed Google Sheets sync command.")
     flush_logging()
@@ -565,9 +571,10 @@ def _run_sync_bigquery(
         else:
             result = service.generate_range(explicit_window)
         logger.info(
-            "Published BigQuery sync for {} across month(s): {}",
+            "Published BigQuery sync for {} across month(s): {} with {} worklogs.",
             space.slug,
             ", ".join(month.label() for month in result.months),
+            result.worklog_count,
         )
     logger.info("Completed BigQuery sync command.")
     flush_logging()

@@ -46,6 +46,7 @@ jobs:
       BIGQUERY_PROJECT_ID: ${{ vars.BIGQUERY_PROJECT_ID }}
       BIGQUERY_DATASET: ${{ vars.BIGQUERY_DATASET }}
       BIGQUERY_TABLE: ${{ vars.BIGQUERY_TABLE || 'worklogs' }}
+      RUN_LOG_DIR: ${{ runner.temp }}/jirareport-logs
 
     steps:
       - name: Checkout repository
@@ -85,32 +86,194 @@ jobs:
       - name: Sync dependencies
         run: uv sync --group dev
 
+      - name: Prepare workflow logs
+        run: mkdir -p "$RUN_LOG_DIR"
+
       - name: Generate reporting datasets
+        id: generate_datasets
         run: |
+          set -o pipefail
           if [ -n "${{ github.event.inputs.from_date }}" ] || [ -n "${{ github.event.inputs.to_date }}" ]; then
-            uv run jirareport backfill --from "${{ github.event.inputs.from_date }}" --to "${{ github.event.inputs.to_date }}"
+            uv run jirareport backfill --from "${{ github.event.inputs.from_date }}" --to "${{ github.event.inputs.to_date }}" 2>&1 | tee "$RUN_LOG_DIR/generate-datasets.log"
           elif [ -n "${{ github.event.inputs.report_date }}" ]; then
-            uv run jirareport daily --date "${{ github.event.inputs.report_date }}"
+            uv run jirareport daily --date "${{ github.event.inputs.report_date }}" 2>&1 | tee "$RUN_LOG_DIR/generate-datasets.log"
           else
-            uv run jirareport daily
+            uv run jirareport daily 2>&1 | tee "$RUN_LOG_DIR/generate-datasets.log"
           fi
 
       - name: Sync BigQuery
+        id: sync_bigquery
         run: |
+          set -o pipefail
           if [ -n "${{ github.event.inputs.from_date }}" ] || [ -n "${{ github.event.inputs.to_date }}" ]; then
-            uv run jirareport sync bigquery --from "${{ github.event.inputs.from_date }}" --to "${{ github.event.inputs.to_date }}"
+            uv run jirareport sync bigquery --from "${{ github.event.inputs.from_date }}" --to "${{ github.event.inputs.to_date }}" 2>&1 | tee "$RUN_LOG_DIR/sync-bigquery.log"
           elif [ -n "${{ github.event.inputs.report_date }}" ]; then
-            uv run jirareport sync bigquery --date "${{ github.event.inputs.report_date }}"
+            uv run jirareport sync bigquery --date "${{ github.event.inputs.report_date }}" 2>&1 | tee "$RUN_LOG_DIR/sync-bigquery.log"
           else
-            uv run jirareport sync bigquery
+            uv run jirareport sync bigquery 2>&1 | tee "$RUN_LOG_DIR/sync-bigquery.log"
           fi
 
       - name: Sync Google Sheets
+        id: sync_sheets
         run: |
+          set -o pipefail
           if [ -n "${{ github.event.inputs.from_date }}" ] || [ -n "${{ github.event.inputs.to_date }}" ]; then
-            uv run jirareport sync sheets --from "${{ github.event.inputs.from_date }}" --to "${{ github.event.inputs.to_date }}"
+            uv run jirareport sync sheets --from "${{ github.event.inputs.from_date }}" --to "${{ github.event.inputs.to_date }}" 2>&1 | tee "$RUN_LOG_DIR/sync-sheets.log"
           elif [ -n "${{ github.event.inputs.report_date }}" ]; then
-            uv run jirareport sync sheets --date "${{ github.event.inputs.report_date }}"
+            uv run jirareport sync sheets --date "${{ github.event.inputs.report_date }}" 2>&1 | tee "$RUN_LOG_DIR/sync-sheets.log"
           else
-            uv run jirareport sync sheets
+            uv run jirareport sync sheets 2>&1 | tee "$RUN_LOG_DIR/sync-sheets.log"
           fi
+
+      - name: Write workflow summary
+        if: always()
+        env:
+          REPORT_DATE: ${{ github.event.inputs.report_date }}
+          FROM_DATE: ${{ github.event.inputs.from_date }}
+          TO_DATE: ${{ github.event.inputs.to_date }}
+          DATASETS_OUTCOME: ${{ steps.generate_datasets.outcome }}
+          BIGQUERY_OUTCOME: ${{ steps.sync_bigquery.outcome }}
+          SHEETS_OUTCOME: ${{ steps.sync_sheets.outcome }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          run_log_dir = Path(os.environ["RUN_LOG_DIR"])
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          report_date = os.environ.get("REPORT_DATE", "").strip()
+          from_date = os.environ.get("FROM_DATE", "").strip()
+          to_date = os.environ.get("TO_DATE", "").strip()
+
+          if from_date and to_date:
+            run_mode = "backfill"
+            run_scope = f"{from_date} -> {to_date}"
+          elif report_date:
+            run_mode = "report_date"
+            run_scope = report_date
+          else:
+            run_mode = "nightly"
+            run_scope = "current operational window"
+
+          patterns = {
+            "datasets": re.compile(
+              r"(?:Daily snapshot for (?P<daily_space>\S+) saved to (?P<daily_path>\S+) "
+              r"with (?P<daily_count>\d+) worklogs across (?P<daily_months>\d+) curated month\(s\)\.)|"
+              r"(?:Historical backfill for (?P<backfill_space>\S+) produced "
+              r"(?P<backfill_months>\d+) monthly report\(s\) from (?P<backfill_count>\d+) worklogs\.)"
+            ),
+            "bigquery": re.compile(
+              r"Published BigQuery sync for (?P<space>\S+) across month\(s\): "
+              r"(?P<months>.+?) with (?P<count>\d+) worklogs\."
+            ),
+            "sheets": re.compile(
+              r"Published Google Sheets sync for (?P<space>\S+) to "
+              r"(?P<targets>.+) with (?P<count>\d+) worklogs\."
+            ),
+          }
+
+          def read_log(name: str) -> str:
+            path = run_log_dir / name
+            if not path.exists():
+              return ""
+            return path.read_text(encoding="utf-8", errors="replace")
+
+          def datasets_rows() -> list[dict[str, str]]:
+            rows: list[dict[str, str]] = []
+            for match in patterns["datasets"].finditer(read_log("generate-datasets.log")):
+              groups = match.groupdict()
+              if groups["daily_space"]:
+                rows.append(
+                  {
+                    "space": groups["daily_space"],
+                    "records": groups["daily_count"],
+                    "months": groups["daily_months"],
+                    "target": groups["daily_path"],
+                  }
+                )
+                continue
+              rows.append(
+                {
+                  "space": groups["backfill_space"],
+                  "records": groups["backfill_count"],
+                  "months": groups["backfill_months"],
+                  "target": "monthly backfill reports",
+                }
+              )
+            return rows
+
+          def phase_rows(
+            log_name: str,
+            pattern_name: str,
+            target_field: str | None = None,
+            target_label: str | None = None,
+          ) -> list[dict[str, str]]:
+            rows: list[dict[str, str]] = []
+            for match in patterns[pattern_name].finditer(read_log(log_name)):
+              groups = match.groupdict()
+              rows.append(
+                {
+                  "space": groups["space"],
+                  "records": groups["count"],
+                  "months": groups.get("months", "-"),
+                  "target": target_label or groups[target_field or ""],
+                }
+              )
+            return rows
+
+          def markdown_table(rows: list[dict[str, str]]) -> str:
+            if not rows:
+              return "_No synced spaces recorded in this phase._"
+            lines = [
+              "| Space | Records | Months | Target |",
+              "| --- | ---: | --- | --- |",
+            ]
+            for row in rows:
+              lines.append(
+                f"| {row['space']} | {row['records']} | {row['months']} | {row['target']} |"
+              )
+            return "\n".join(lines)
+
+          sections = [
+            ("Datasets", os.environ.get("DATASETS_OUTCOME", "skipped"), datasets_rows()),
+            (
+              "BigQuery",
+              os.environ.get("BIGQUERY_OUTCOME", "skipped"),
+              phase_rows(
+                "sync-bigquery.log",
+                "bigquery",
+                target_label="worklogs table + reporting views",
+              ),
+            ),
+            (
+              "Google Sheets",
+              os.environ.get("SHEETS_OUTCOME", "skipped"),
+              phase_rows("sync-sheets.log", "sheets", target_field="targets"),
+            ),
+          ]
+
+          lines = [
+            "## JiraReport Sync Summary",
+            "",
+            f"- Job status: `{os.environ.get('JOB_STATUS', 'unknown')}`",
+            f"- Run mode: `{run_mode}`",
+            f"- Scope: `{run_scope}`",
+            "",
+          ]
+
+          for title, outcome, rows in sections:
+            lines.extend(
+              [
+                f"### {title}",
+                "",
+                f"- Step outcome: `{outcome}`",
+                "",
+                markdown_table(rows),
+                "",
+              ]
+            )
+
+          summary_path.write_text("\n".join(lines), encoding="utf-8")
+          PY

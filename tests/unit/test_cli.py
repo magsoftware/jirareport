@@ -30,6 +30,7 @@ from jirareport.interfaces.cli import app
 class DailyResult:
     snapshot_path: str
     curated_paths: tuple[str, ...] = ()
+    worklog_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class BackfillResult:
 @dataclass(frozen=True)
 class SyncSheetsResult:
     spreadsheet_urls: tuple[str, ...]
+    worklog_count: int = 0
 
 
 @dataclass
@@ -62,7 +64,7 @@ class FakeDailyService:
 
     def generate(self, reference_date: date) -> DailyResult:
         self.last_date = reference_date
-        return DailyResult(snapshot_path="raw/daily.json")
+        return DailyResult(snapshot_path="raw/daily.json", worklog_count=3)
 
 
 @dataclass
@@ -111,13 +113,15 @@ class FakeSheetsSyncService:
     def generate(self, reference_date: date) -> SyncSheetsResult:
         self.last_date = reference_date
         return SyncSheetsResult(
-            spreadsheet_urls=("https://docs.google.com/spreadsheets/d/sheet/edit",)
+            spreadsheet_urls=("https://docs.google.com/spreadsheets/d/sheet/edit",),
+            worklog_count=3,
         )
 
     def generate_range(self, window: DateRange) -> SyncSheetsResult:
         self.last_window = window
         return SyncSheetsResult(
-            spreadsheet_urls=("https://docs.google.com/spreadsheets/d/sheet/edit",)
+            spreadsheet_urls=("https://docs.google.com/spreadsheets/d/sheet/edit",),
+            worklog_count=10,
         )
 
 
@@ -131,14 +135,21 @@ class FakeBigQuerySyncService:
 
     def generate(self, reference_date: date) -> object:
         self.last_date = reference_date
-        return type("Result", (), {"months": (MonthId(year=2026, month=3),)})()
+        return type(
+            "Result",
+            (),
+            {"months": (MonthId(year=2026, month=3),), "worklog_count": 3},
+        )()
 
     def generate_range(self, window: DateRange) -> object:
         self.last_window = window
         return type(
             "Result",
             (),
-            {"months": (MonthId(year=2025, month=1), MonthId(year=2025, month=2))},
+            {
+                "months": (MonthId(year=2025, month=1), MonthId(year=2025, month=2)),
+                "worklog_count": 10,
+            },
         )()
 
 
