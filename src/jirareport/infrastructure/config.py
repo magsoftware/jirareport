@@ -53,14 +53,22 @@ class BigQuerySettings:
 
 @dataclass(frozen=True)
 class ConfiguredSpace:
-    """Represents one configured reporting space and its adapter settings."""
+    """Represents one configured reporting space and its adapter settings.
+
+    The embedded ``space`` field stays domain-oriented, while the remaining
+    attributes hold adapter-specific configuration used by publishing backends.
+    """
 
     space: JiraSpace
     board_id: int | None = None
     google_sheets_ids: tuple[tuple[int, str], ...] = ()
 
     def google_sheets_id_map(self) -> dict[int, str]:
-        """Returns configured spreadsheet IDs keyed by reporting year."""
+        """Returns configured spreadsheet IDs keyed by reporting year.
+
+        Returns:
+            Plain mapping passed to the spreadsheet resolver.
+        """
         return dict(self.google_sheets_ids)
 
 
@@ -77,32 +85,46 @@ class AppSettings:
 
 
 def load_settings() -> AppSettings:
-    """Loads and validates application settings from the environment."""
+    """Loads and validates application settings from the environment.
+
+    Returns:
+        Fully parsed application settings ready for CLI dispatch.
+
+    Raises:
+        ValueError: If required environment variables or space configuration are invalid.
+    """
     load_dotenv()
+
     jira = JiraSettings(
         base_url=_required_env("JIRA_BASE_URL").rstrip("/"),
         email=_required_env("JIRA_EMAIL"),
         api_token=_required_env("JIRA_API_TOKEN"),
     )
+
     configured_spaces = _load_configured_spaces()
     backend = _storage_backend_from_env()
+
     storage = StorageSettings(
         backend=backend,
         local_output_dir=Path(os.getenv("REPORT_OUTPUT_DIR", "reports")),
         bucket_name=_bucket_name_for_backend(backend),
         bucket_prefix=os.getenv("GCS_BUCKET_PREFIX", "jirareport"),
     )
+
     sheets = SheetsSettings(
         enabled=_sheets_enabled_from_env(configured_spaces),
         title_prefix=os.getenv("GOOGLE_SHEETS_TITLE_PREFIX", "Jira Worklog Analytics"),
     )
+
     bigquery = BigQuerySettings(
         enabled=_bigquery_enabled_from_env(),
         project_id=os.getenv("BIGQUERY_PROJECT_ID"),
         dataset=os.getenv("BIGQUERY_DATASET"),
         table=os.getenv("BIGQUERY_TABLE", "worklogs"),
     )
+
     timezone_name = os.getenv("REPORT_TIMEZONE", "Europe/Warsaw")
+
     return AppSettings(
         jira=jira,
         storage=storage,
@@ -139,14 +161,24 @@ def _bucket_name_for_backend(backend: StorageBackend) -> str | None:
 
 
 def _load_configured_spaces() -> tuple[ConfiguredSpace, ...]:
-    """Loads configured reporting spaces from the YAML configuration file."""
+    """Loads configured reporting spaces from the YAML configuration file.
+
+    Returns:
+        Parsed reporting spaces with adapter-specific configuration.
+
+    Raises:
+        ValueError: If the YAML payload is missing, malformed, or empty.
+    """
     config_path = Path(os.getenv("JIRA_SPACES_CONFIG_PATH", "config/spaces.yaml"))
     payload = _load_yaml_mapping(config_path)
     raw_spaces = payload.get("spaces")
+
     if not isinstance(raw_spaces, list) or not raw_spaces:
         raise ValueError("Spaces configuration must define a non-empty 'spaces' list.")
+
     spaces = tuple(_parse_configured_space(item) for item in raw_spaces)
     _validate_unique_space_values(spaces)
+
     return spaces
 
 
@@ -162,14 +194,26 @@ def _load_yaml_mapping(path: Path) -> dict[str, object]:
 
 
 def _parse_configured_space(raw: object) -> ConfiguredSpace:
-    """Parses one configured reporting space from YAML data."""
+    """Parses one configured reporting space from YAML data.
+
+    Args:
+        raw: One item from the top-level ``spaces`` YAML list.
+
+    Returns:
+        Parsed configured space with domain and adapter fields separated.
+
+    Raises:
+        ValueError: If the item does not follow the expected mapping schema.
+    """
     if not isinstance(raw, Mapping):
         raise ValueError("Each space configuration entry must be a mapping.")
+
     key = _required_mapping_string(raw, "key")
     name = _required_mapping_string(raw, "name")
     slug = _required_mapping_string(raw, "slug")
     board_id = _optional_mapping_int(raw, "board_id")
     google_sheets_ids = _parse_sheet_ids(raw.get("google_sheets_ids"))
+
     return ConfiguredSpace(
         space=JiraSpace(
             key=key,
@@ -201,19 +245,33 @@ def _optional_mapping_int(raw: Mapping[str, object], key: str) -> int | None:
 
 
 def _parse_sheet_ids(raw: object) -> tuple[tuple[int, str], ...]:
-    """Parses per-year spreadsheet IDs from a config mapping."""
+    """Parses per-year spreadsheet IDs from a config mapping.
+
+    Args:
+        raw: Unvalidated ``google_sheets_ids`` node from YAML.
+
+    Returns:
+        Sorted ``(year, spreadsheet_id)`` pairs used by publishing adapters.
+
+    Raises:
+        ValueError: If the mapping contains invalid year keys or spreadsheet IDs.
+    """
     if raw is None or raw == "":
         return ()
+
     if not isinstance(raw, Mapping):
         message = "'google_sheets_ids' must be a mapping of year to spreadsheet ID."
         raise ValueError(message)
+
     result: list[tuple[int, str]] = []
+
     for year, spreadsheet_id in raw.items():
         if not isinstance(year, int):
             raise ValueError("Google Sheets year keys must be integers.")
         if not isinstance(spreadsheet_id, str) or not spreadsheet_id.strip():
             raise ValueError("Google Sheets spreadsheet IDs must be non-empty strings.")
         result.append((year, spreadsheet_id.strip()))
+
     return tuple(sorted(result))
 
 

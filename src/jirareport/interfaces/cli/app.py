@@ -259,7 +259,15 @@ def _add_sync_bigquery_parser(
 
 
 def _dispatch_command(args: argparse.Namespace, settings: AppSettings) -> int:
-    """Dispatches the parsed CLI command."""
+    """Dispatches the parsed CLI command.
+
+    Args:
+        args: Parsed top-level CLI arguments.
+        settings: Fully loaded application settings.
+
+    Returns:
+        Process exit code for the selected command.
+    """
     if args.command == "daily":
         return _run_daily(
             args.date,
@@ -292,7 +300,15 @@ def _dispatch_command(args: argparse.Namespace, settings: AppSettings) -> int:
 
 
 def _dispatch_sync_command(args: argparse.Namespace, settings: AppSettings) -> int:
-    """Dispatches synchronization subcommands."""
+    """Dispatches synchronization subcommands.
+
+    Args:
+        args: Parsed CLI arguments for the ``sync`` command tree.
+        settings: Fully loaded application settings.
+
+    Returns:
+        Process exit code for the selected synchronization target.
+    """
     if args.sync_target == "bigquery":
         return _run_sync_bigquery(
             args.date,
@@ -315,8 +331,17 @@ def _dispatch_sync_command(args: argparse.Namespace, settings: AppSettings) -> i
 
 
 def _build_source(settings: AppSettings, space: JiraSpace) -> WorklogSource:
-    """Builds the configured worklog source adapter."""
+    """Builds the configured worklog source adapter.
+
+    Args:
+        settings: Application settings holding shared Jira credentials.
+        space: Reporting space selected for the current command.
+
+    Returns:
+        Jira-backed worklog source bound to the selected space.
+    """
     jira = settings.jira
+
     return JiraWorklogSource(
         base_url=jira.base_url,
         email=jira.email,
@@ -354,11 +379,23 @@ def _build_spreadsheet_publisher(settings: AppSettings) -> SpreadsheetPublisher:
 
 
 def _build_worklog_warehouse(settings: AppSettings) -> WorklogWarehouse:
-    """Builds the configured analytical worklog warehouse adapter."""
+    """Builds the configured analytical worklog warehouse adapter.
+
+    Args:
+        settings: Application settings holding BigQuery configuration.
+
+    Returns:
+        Warehouse adapter ready to load curated monthly worklogs.
+
+    Raises:
+        ValueError: If BigQuery is disabled or missing required connection settings.
+    """
     if not settings.bigquery.enabled:
         raise ValueError("BigQuery reporting is disabled.")
+
     if settings.bigquery.project_id is None or settings.bigquery.dataset is None:
         raise ValueError("BigQuery project and dataset must be configured.")
+
     return BigQueryWorklogWarehouse(
         project_id=settings.bigquery.project_id,
         dataset=settings.bigquery.dataset,
@@ -371,10 +408,23 @@ def _build_spreadsheet_resolver(
     settings: AppSettings,
     configured_space: ConfiguredSpace,
 ) -> SpreadsheetResolver:
-    """Builds the configured yearly spreadsheet resolver."""
+    """Builds the configured yearly spreadsheet resolver.
+
+    Args:
+        settings: Application settings holding global Sheets configuration.
+        configured_space: Selected reporting space together with adapter config.
+
+    Returns:
+        Resolver mapping reporting years to concrete spreadsheet IDs.
+
+    Raises:
+        ValueError: If Google Sheets publishing is disabled.
+    """
     if not settings.sheets.enabled:
         raise ValueError("Google Sheets publishing is disabled.")
+
     space = configured_space.space
+
     return GoogleSheetsResolver(
         spreadsheet_ids=configured_space.google_sheets_id_map(),
         title_prefix=f"{settings.sheets.title_prefix} - {space.name}",
@@ -398,12 +448,29 @@ def _resolve_reference_date_or_window(
     timezone_name: str,
     command_label: str,
 ) -> tuple[date | None, DateRange | None]:
-    """Resolves either an operational reference date or an explicit range."""
+    """Resolves either an operational reference date or an explicit range.
+
+    Args:
+        input_date: Optional ``--date`` argument from the CLI.
+        input_from: Optional explicit range start from the CLI.
+        input_to: Optional explicit range end from the CLI.
+        timezone_name: Reporting timezone used when ``--date`` is omitted.
+        command_label: Human-readable command label used in validation errors.
+
+    Returns:
+        Tuple of ``(reference_date, explicit_window)`` where one element is ``None``.
+
+    Raises:
+        ValueError: If ``--date`` is combined with an explicit range.
+    """
     explicit_window = _explicit_window_optional(input_from, input_to)
+
     if input_date and explicit_window is not None:
         raise ValueError(f"Use either --date or --from/--to for {command_label}.")
+
     if explicit_window is not None:
         return None, explicit_window
+
     return _resolve_reference_date(input_date, timezone_name), None
 
 
@@ -412,7 +479,13 @@ def _run_for_selected_spaces(
     selector: str | None,
     runner: Callable[[ConfiguredSpace], None],
 ) -> None:
-    """Executes one callback for every selected reporting space."""
+    """Executes one callback for every selected reporting space.
+
+    Args:
+        settings: Application settings holding all configured reporting spaces.
+        selector: Optional key or slug used to narrow the selection.
+        runner: Callback executed once for each selected configured space.
+    """
     for configured_space in _selected_spaces(settings, selector):
         runner(configured_space)
 
@@ -425,11 +498,24 @@ def _run_daily(
     report_storage: JsonReportStorage,
     dataset_storage: CuratedDatasetStorage,
 ) -> int:
-    """Runs the main daily use case."""
+    """Runs the main daily use case.
+
+    Args:
+        input_date: Optional ``--date`` argument from the CLI.
+        space_selector: Optional Jira space key or slug.
+        settings: Fully loaded application settings.
+        source_builder: Factory building the worklog source for one space.
+        report_storage: JSON storage backend for raw and derived reports.
+        dataset_storage: Curated dataset storage backend for Parquet payloads.
+
+    Returns:
+        Process exit code.
+    """
     reference_date = _resolve_reference_date(input_date, settings.timezone_name)
 
     def run_for_space(configured_space: ConfiguredSpace) -> None:
         space = configured_space.space
+
         service = DailySnapshotService(
             source=source_builder(settings, space),
             report_storage=report_storage,
@@ -437,7 +523,9 @@ def _run_daily(
             space=space,
             timezone_name=settings.timezone_name,
         )
+
         result = service.generate(reference_date)
+
         logger.info(
             ("Daily snapshot for {} saved to {} with {} worklogs across {} curated month(s)."),
             space.slug,
@@ -460,11 +548,25 @@ def _run_backfill(
     report_storage: JsonReportStorage,
     dataset_storage: CuratedDatasetStorage,
 ) -> int:
-    """Runs the historical backfill use case for an explicit range."""
+    """Runs the historical backfill use case for an explicit range.
+
+    Args:
+        input_from: Required explicit range start from the CLI.
+        input_to: Required explicit range end from the CLI.
+        space_selector: Optional Jira space key or slug.
+        settings: Fully loaded application settings.
+        source_builder: Factory building the worklog source for one space.
+        report_storage: JSON storage backend for derived monthly reports.
+        dataset_storage: Curated dataset storage backend for Parquet payloads.
+
+    Returns:
+        Process exit code.
+    """
     window = _explicit_window(input_from, input_to)
 
     def run_for_space(configured_space: ConfiguredSpace) -> None:
         space = configured_space.space
+
         service = BackfillService(
             source=source_builder(settings, space),
             report_storage=report_storage,
@@ -472,7 +574,9 @@ def _run_backfill(
             space=space,
             timezone_name=settings.timezone_name,
         )
+
         result = service.generate(window)
+
         logger.info(
             ("Historical backfill for {} produced {} monthly report(s) from {} worklogs."),
             space.slug,
@@ -493,11 +597,24 @@ def _run_monthly(
     report_storage: JsonReportStorage,
     dataset_storage: CuratedDatasetStorage,
 ) -> int:
-    """Runs the ad hoc monthly report generation use case."""
+    """Runs the ad hoc monthly report generation use case.
+
+    Args:
+        input_month: Optional ``--month`` argument from the CLI.
+        space_selector: Optional Jira space key or slug.
+        settings: Fully loaded application settings.
+        source_builder: Factory building the worklog source for one space.
+        report_storage: JSON storage backend for derived monthly reports.
+        dataset_storage: Curated dataset storage backend for Parquet payloads.
+
+    Returns:
+        Process exit code.
+    """
     month = MonthId.parse(input_month) if input_month else MonthId.from_date(current_date(settings.timezone_name))
 
     def run_for_space(configured_space: ConfiguredSpace) -> None:
         space = configured_space.space
+
         service = MonthlyReportService(
             source=source_builder(settings, space),
             report_storage=report_storage,
@@ -505,7 +622,9 @@ def _run_monthly(
             space=space,
             timezone_name=settings.timezone_name,
         )
+
         result = service.generate(month)
+
         logger.info(
             "Monthly report for {} saved to {}",
             space.slug,
@@ -526,7 +645,20 @@ def _run_sync_sheets(
     source_builder: Callable[[AppSettings, JiraSpace], WorklogSource],
     publisher: SpreadsheetPublisher,
 ) -> int:
-    """Runs the Google Sheets synchronization use case."""
+    """Runs the Google Sheets synchronization use case.
+
+    Args:
+        input_date: Optional operational ``--date`` argument.
+        input_from: Optional explicit range start.
+        input_to: Optional explicit range end.
+        space_selector: Optional Jira space key or slug.
+        settings: Fully loaded application settings.
+        source_builder: Factory building the worklog source for one space.
+        publisher: Configured Sheets publisher adapter.
+
+    Returns:
+        Process exit code.
+    """
     reference_date, explicit_window = _resolve_reference_date_or_window(
         input_date=input_date,
         input_from=input_from,
@@ -537,6 +669,7 @@ def _run_sync_sheets(
 
     def run_for_space(configured_space: ConfiguredSpace) -> None:
         space = configured_space.space
+
         service = SheetsSyncService(
             source=source_builder(settings, space),
             publisher=publisher,
@@ -544,11 +677,13 @@ def _run_sync_sheets(
             space=space,
             timezone_name=settings.timezone_name,
         )
+
         if explicit_window is None:
             assert reference_date is not None
             result = service.generate(reference_date)
         else:
             result = service.generate_range(explicit_window)
+
         logger.info(
             "Published Google Sheets sync for {} to {} with {} worklogs.",
             space.slug,
@@ -570,7 +705,20 @@ def _run_sync_bigquery(
     dataset_storage: CuratedDatasetStorage,
     warehouse: WorklogWarehouse,
 ) -> int:
-    """Runs the BigQuery synchronization use case."""
+    """Runs the BigQuery synchronization use case.
+
+    Args:
+        input_date: Optional operational ``--date`` argument.
+        input_from: Optional explicit range start.
+        input_to: Optional explicit range end.
+        space_selector: Optional Jira space key or slug.
+        settings: Fully loaded application settings.
+        dataset_storage: Curated dataset storage backend.
+        warehouse: Configured analytical warehouse adapter.
+
+    Returns:
+        Process exit code.
+    """
     reference_date, explicit_window = _resolve_reference_date_or_window(
         input_date=input_date,
         input_from=input_from,
@@ -581,16 +729,19 @@ def _run_sync_bigquery(
 
     def run_for_space(configured_space: ConfiguredSpace) -> None:
         space = configured_space.space
+
         service = BigQuerySyncService(
             dataset_storage=dataset_storage,
             warehouse=warehouse,
             space=space,
         )
+
         if explicit_window is None:
             assert reference_date is not None
             result = service.generate(reference_date)
         else:
             result = service.generate_range(explicit_window)
+
         logger.info(
             "Published BigQuery sync for {} across month(s): {} with {} worklogs.",
             space.slug,
@@ -627,11 +778,24 @@ def _selected_spaces(
     settings: AppSettings,
     selector: str | None,
 ) -> tuple[ConfiguredSpace, ...]:
-    """Returns either all configured spaces or one selected by key or slug."""
+    """Returns either all configured spaces or one selected by key or slug.
+
+    Args:
+        settings: Application settings holding configured reporting spaces.
+        selector: Optional key or slug used to narrow the selection.
+
+    Returns:
+        Tuple containing either all configured spaces or the selected one.
+
+    Raises:
+        ValueError: If the selector does not match any configured space.
+    """
     if selector in {None, ""}:
         return settings.configured_spaces
+
     for configured_space in settings.configured_spaces:
         space = configured_space.space
         if selector in {space.key, space.slug}:
             return (configured_space,)
+
     raise ValueError(f"Unknown Jira space selector: {selector}")

@@ -126,6 +126,7 @@ class DailySnapshotService:
         window = rolling_window(reference_date)
         generated_at = datetime.now(self._timezone)
         worklogs = _fetch_sorted_worklogs(self._source, window)
+
         snapshot = DailyRawSnapshot(
             space=self._space,
             snapshot_date=reference_date,
@@ -134,6 +135,7 @@ class DailySnapshotService:
             timezone_name=self._timezone_name,
             worklogs=tuple(worklogs),
         )
+
         snapshot_path = self._report_storage.write_json(
             _daily_snapshot_path(self._space, reference_date),
             serialize_daily_snapshot(snapshot),
@@ -147,6 +149,7 @@ class DailySnapshotService:
             generated_at=generated_at,
             timezone_name=self._timezone_name,
         )
+
         logger.info(
             "Generated snapshot for space {} with {} worklogs across {} month(s).",
             self._space.slug,
@@ -181,10 +184,18 @@ class MonthlyReportService:
         self._timezone_name = timezone_name
 
     def generate(self, month: MonthId) -> MonthlyReportResult:
-        """Generates one monthly report for the requested month."""
+        """Generates one monthly report for the requested month.
+
+        Args:
+            month: Target calendar month to rebuild.
+
+        Returns:
+            Metadata describing the written monthly report and curated dataset.
+        """
         window = month_range(month)
         generated_at = datetime.now(self._timezone)
         worklogs = _fetch_sorted_worklogs(self._source, window)
+
         report_paths, curated_paths, reports = _write_monthly_reports(
             report_storage=self._report_storage,
             dataset_storage=self._dataset_storage,
@@ -194,8 +205,10 @@ class MonthlyReportService:
             generated_at=generated_at,
             timezone_name=self._timezone_name,
         )
+
         report = reports[0]
         ticket_count = len(report.tickets)
+
         return MonthlyReportResult(
             report_paths[0],
             curated_paths[0],
@@ -224,9 +237,17 @@ class BackfillService:
         self._timezone_name = timezone_name
 
     def generate(self, window: DateRange) -> BackfillResult:
-        """Generates monthly reports for every month touched by the range."""
+        """Generates monthly reports for every month touched by the range.
+
+        Args:
+            window: Inclusive historical range that should be rebuilt.
+
+        Returns:
+            Metadata describing all written monthly reports and curated datasets.
+        """
         generated_at = datetime.now(self._timezone)
         worklogs = _fetch_sorted_worklogs(self._source, window)
+
         logger.info(
             "Starting historical backfill for space {} in range {} to {}.",
             self._space.slug,
@@ -242,6 +263,7 @@ class BackfillService:
             generated_at=generated_at,
             timezone_name=self._timezone_name,
         )
+
         logger.info(
             ("Completed historical backfill for space {} with {} worklogs across {} month(s)."),
             self._space.slug,
@@ -276,7 +298,14 @@ class SheetsSyncService:
         self._timezone_name = timezone_name
 
     def generate(self, reference_date: date) -> SpreadsheetSyncResult:
-        """Builds the current snapshot and publishes it to yearly spreadsheets."""
+        """Builds the current snapshot and publishes it to yearly spreadsheets.
+
+        Args:
+            reference_date: Operational date used to calculate the rolling window.
+
+        Returns:
+            Metadata describing the published spreadsheet URLs and worklog count.
+        """
         return self._sync_snapshot(
             snapshot_date=reference_date,
             window=rolling_window(reference_date),
@@ -284,7 +313,14 @@ class SheetsSyncService:
         )
 
     def generate_range(self, window: DateRange) -> SpreadsheetSyncResult:
-        """Builds a snapshot for an explicit range and publishes monthly raw tabs."""
+        """Builds a snapshot for an explicit range and publishes monthly raw tabs.
+
+        Args:
+            window: Inclusive historical range to publish to spreadsheets.
+
+        Returns:
+            Metadata describing the published spreadsheet URLs and worklog count.
+        """
         return self._sync_snapshot(
             snapshot_date=window.end,
             window=window,
@@ -297,8 +333,18 @@ class SheetsSyncService:
         window: DateRange,
         explicit_range: bool,
     ) -> SpreadsheetSyncResult:
-        """Builds and publishes a snapshot for either rolling or explicit windows."""
+        """Builds and publishes a snapshot for either rolling or explicit windows.
+
+        Args:
+            snapshot_date: Snapshot date that should be written into the payload.
+            window: Inclusive worklog window used to build the snapshot.
+            explicit_range: Whether the window comes from explicit CLI boundaries.
+
+        Returns:
+            Metadata describing the published spreadsheet URLs and worklog count.
+        """
         self._log_sync_start(snapshot_date, window, explicit_range)
+
         snapshot = _build_snapshot_for_window(
             source=self._source,
             space=self._space,
@@ -307,12 +353,15 @@ class SheetsSyncService:
             timezone=self._timezone,
             timezone_name=self._timezone_name,
         )
+
         urls = self._publish_yearly_requests(snapshot)
+
         self._log_sync_completion(
             worklog_count=len(snapshot.worklogs),
             spreadsheet_count=len(urls),
             explicit_range=explicit_range,
         )
+
         return SpreadsheetSyncResult(tuple(urls), len(snapshot.worklogs))
 
     def _log_sync_start(
@@ -406,22 +455,45 @@ class BigQuerySyncService:
         self._space = space
 
     def generate(self, reference_date: date) -> BigQuerySyncResult:
-        """Loads the active operational months into BigQuery."""
+        """Loads the active operational months into BigQuery.
+
+        Args:
+            reference_date: Operational date used to determine active months.
+
+        Returns:
+            Metadata describing synchronized months and loaded worklog count.
+        """
         months = active_months(reference_date)
         return self._sync_months(months)
 
     def generate_range(self, window: DateRange) -> BigQuerySyncResult:
-        """Loads every month touched by an explicit historical range."""
+        """Loads every month touched by an explicit historical range.
+
+        Args:
+            window: Inclusive historical range whose touched months should be loaded.
+
+        Returns:
+            Metadata describing synchronized months and loaded worklog count.
+        """
         months = months_in_range(window)
         return self._sync_months(months)
 
     def _sync_months(self, months: tuple[MonthId, ...]) -> BigQuerySyncResult:
+        """Loads curated monthly datasets and refreshes reporting views.
+
+        Args:
+            months: Calendar months that should be loaded into the warehouse.
+
+        Returns:
+            Metadata describing synchronized months and loaded worklog count.
+        """
         logger.info(
             "Starting BigQuery sync for space {} across {} month(s).",
             self._space.slug,
             len(months),
         )
         worklog_count = 0
+
         for month in months:
             payload = self._dataset_storage.read_bytes(_monthly_worklogs_path(self._space, month))
             worklog_count += count_parquet_rows(payload)
@@ -431,8 +503,10 @@ class BigQuerySyncService:
                 self._space.slug,
                 month.label(),
             )
+
         self._warehouse.ensure_views()
         logger.info("Completed BigQuery sync for space {}.", self._space.slug)
+
         return BigQuerySyncResult(months, worklog_count)
 
 
@@ -443,12 +517,25 @@ def _build_monthly_report(
     generated_at: datetime,
     timezone_name: str,
 ) -> MonthlyWorklogReport:
-    """Builds a monthly report by grouping worklogs per ticket."""
+    """Builds a monthly report by grouping worklogs per ticket.
+
+    Args:
+        worklogs: Sorted worklogs covering the requested reporting window.
+        space: Reporting space the result belongs to.
+        month: Target calendar month to extract from the fetched worklogs.
+        generated_at: Timestamp recorded in the report metadata.
+        timezone_name: Reporting timezone name stored in the payload.
+
+    Returns:
+        Monthly report containing ticket-level worklog groupings.
+    """
     relevant = _worklogs_for_month(worklogs, month)
     tickets: dict[tuple[str, str, str], list[WorklogEntry]] = {}
+
     for entry in relevant:
         key = (entry.issue_key, entry.issue_summary, entry.issue_type)
         tickets.setdefault(key, []).append(entry)
+
     ticket_reports = tuple(
         TicketWorklogReport(
             issue_key=issue_key,
@@ -458,6 +545,7 @@ def _build_monthly_report(
         )
         for issue_key, summary, issue_type, entries in _sorted_tickets(tickets)
     )
+
     return MonthlyWorklogReport(
         space=space,
         month=month,
@@ -471,7 +559,15 @@ def _fetch_sorted_worklogs(
     source: WorklogSource,
     window: DateRange,
 ) -> list[WorklogEntry]:
-    """Fetches worklogs for a window and sorts them deterministically."""
+    """Fetches worklogs for a window and sorts them deterministically.
+
+    Args:
+        source: Worklog provider used by the current use case.
+        window: Inclusive range requested from the source.
+
+    Returns:
+        Sorted worklogs ready for deterministic serialization and grouping.
+    """
     return _sort_worklogs(source.fetch_worklogs(window))
 
 
@@ -483,9 +579,22 @@ def _build_snapshot_for_window(
     timezone: ZoneInfo,
     timezone_name: str,
 ) -> DailyRawSnapshot:
-    """Builds an in-memory snapshot for either operational or explicit windows."""
+    """Builds an in-memory snapshot for either operational or explicit windows.
+
+    Args:
+        source: Worklog provider used by the current use case.
+        space: Reporting space the snapshot belongs to.
+        snapshot_date: Snapshot date stored in the raw payload.
+        window: Inclusive worklog range used to populate the snapshot.
+        timezone: Concrete timezone object used for generated timestamps.
+        timezone_name: Reporting timezone name stored in the payload.
+
+    Returns:
+        Raw daily snapshot built from fetched and sorted worklogs.
+    """
     generated_at = datetime.now(timezone)
     worklogs = _fetch_sorted_worklogs(source, window)
+
     return DailyRawSnapshot(
         space=space,
         snapshot_date=snapshot_date,
@@ -505,10 +614,24 @@ def _write_monthly_reports(
     generated_at: datetime,
     timezone_name: str,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[MonthlyWorklogReport, ...]]:
-    """Writes derived monthly reports and curated datasets for requested months."""
+    """Writes derived monthly reports and curated datasets for requested months.
+
+    Args:
+        report_storage: JSON storage backend for derived monthly reports.
+        dataset_storage: Curated dataset storage backend for Parquet payloads.
+        space: Reporting space the outputs belong to.
+        months: Calendar months that should be materialized.
+        worklogs: Sorted worklogs covering the requested reporting window.
+        generated_at: Timestamp recorded in written report metadata.
+        timezone_name: Reporting timezone name stored in written payloads.
+
+    Returns:
+        Tuple of JSON paths, curated dataset paths, and in-memory report objects.
+    """
     report_paths: list[str] = []
     curated_paths: list[str] = []
     reports: list[MonthlyWorklogReport] = []
+
     for month in months:
         report_path, curated_path, report = _write_monthly_report(
             report_storage=report_storage,
@@ -522,6 +645,7 @@ def _write_monthly_reports(
         report_paths.append(report_path)
         curated_paths.append(curated_path)
         reports.append(report)
+
     return tuple(report_paths), tuple(curated_paths), tuple(reports)
 
 

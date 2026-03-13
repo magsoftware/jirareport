@@ -56,6 +56,7 @@ def serialize_daily_snapshot(snapshot: DailyRawSnapshot) -> JsonObject:
     """
     snapshot_date = snapshot.snapshot_date.isoformat()
     worklogs: list[JsonValue] = [serialize_worklog(entry, snapshot_date=snapshot_date) for entry in snapshot.worklogs]
+
     return {
         "report_type": "daily_raw_snapshot",
         "project_key": snapshot.project_key,
@@ -89,6 +90,7 @@ def serialize_monthly_report(report: MonthlyWorklogReport) -> JsonObject:
                 "bookings": [serialize_worklog(entry) for entry in ticket.bookings],
             }
         )
+
     return {
         "report_type": "monthly_worklogs",
         "project_key": report.project_key,
@@ -101,7 +103,14 @@ def serialize_monthly_report(report: MonthlyWorklogReport) -> JsonObject:
 
 
 def serialize_space(space: JiraSpace) -> JsonObject:
-    """Serializes Jira space metadata for JSON report payloads."""
+    """Serializes Jira space metadata for JSON report payloads.
+
+    Args:
+        space: Reporting space attached to the current payload.
+
+    Returns:
+        A JSON-serializable dictionary with stable space identifiers.
+    """
     return {
         "key": space.key,
         "name": space.name,
@@ -110,5 +119,12 @@ def serialize_space(space: JiraSpace) -> JsonObject:
 
 
 def _format_datetime(value: datetime) -> str:
-    """Formats a datetime without fractional seconds for report output."""
+    """Formats a datetime without fractional seconds for report output.
+
+    Args:
+        value: Datetime value emitted into report payloads.
+
+    Returns:
+        ISO 8601 datetime string truncated to whole seconds.
+    """
     return value.isoformat(timespec="seconds")
