@@ -474,17 +474,18 @@ def _build_monthly_report(
 ) -> MonthlyWorklogReport:
     """Builds a monthly report by grouping worklogs per ticket."""
     relevant = _worklogs_for_month(worklogs, month)
-    tickets: dict[tuple[str, str], list[WorklogEntry]] = {}
+    tickets: dict[tuple[str, str, str], list[WorklogEntry]] = {}
     for entry in relevant:
-        key = (entry.issue_key, entry.issue_summary)
+        key = (entry.issue_key, entry.issue_summary, entry.issue_type)
         tickets.setdefault(key, []).append(entry)
     ticket_reports = tuple(
         TicketWorklogReport(
             issue_key=issue_key,
             summary=summary,
+            issue_type=issue_type,
             bookings=tuple(_sort_worklogs(entries)),
         )
-        for issue_key, summary, entries in _sorted_tickets(tickets)
+        for issue_key, summary, issue_type, entries in _sorted_tickets(tickets)
     )
     return MonthlyWorklogReport(
         space=space,
@@ -535,14 +536,14 @@ def _build_snapshot_for_window(
 
 
 def _sorted_tickets(
-    tickets: dict[tuple[str, str], list[WorklogEntry]]
-) -> list[tuple[str, str, list[WorklogEntry]]]:
+    tickets: dict[tuple[str, str, str], list[WorklogEntry]]
+) -> list[tuple[str, str, str, list[WorklogEntry]]]:
     """Returns grouped tickets sorted by issue key."""
     items = [
-        (issue_key, summary, entries)
-        for (issue_key, summary), entries in tickets.items()
+        (issue_key, summary, issue_type, entries)
+        for (issue_key, summary, issue_type), entries in tickets.items()
     ]
-    return sorted(items, key=lambda item: item[0])
+    return sorted(items, key=lambda item: (item[0], item[1], item[2]))
 
 
 def _sort_worklogs(worklogs: list[WorklogEntry]) -> list[WorklogEntry]:

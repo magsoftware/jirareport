@@ -33,13 +33,24 @@ def test_parse_issues_skips_invalid_items() -> None:
         "issues": [
             "bad",
             {"key": "PRJ-0", "fields": "bad"},
-            {"key": "PRJ-1", "fields": {"summary": "Work item"}},
+            {
+                "key": "PRJ-1",
+                "fields": {"summary": "Work item", "issuetype": {"name": "Task"}},
+            },
         ]
     }
 
     issues = _parse_issues(payload)
 
-    assert issues == [Issue(key="PRJ-1", summary="Work item")]
+    assert issues == [Issue(key="PRJ-1", summary="Work item", issue_type="Task")]
+
+
+def test_parse_issues_defaults_unknown_issue_type() -> None:
+    payload = {"issues": [{"key": "PRJ-1", "fields": {"summary": "Work item"}}]}
+
+    issues = _parse_issues(payload)
+
+    assert issues == [Issue(key="PRJ-1", summary="Work item", issue_type="Unknown")]
 
 
 def test_parse_worklogs_skips_non_dict_payload_items(
@@ -48,7 +59,7 @@ def test_parse_worklogs_skips_non_dict_payload_items(
     payload = {"worklogs": ["bad"]}
 
     result = _parse_worklogs(
-        Issue("PRJ-1", "Task"),
+        Issue("PRJ-1", "Task", "Task"),
         payload,
         DateRange(start=date(2026, 3, 1), end=date(2026, 3, 31)),
         warsaw_timezone,
@@ -93,8 +104,20 @@ def test_search_issues_falls_back_to_short_page_without_total() -> None:
             [
                 {
                     "issues": [
-                        {"key": "PRJ-1", "fields": {"summary": "Summary 1"}},
-                        {"key": "PRJ-2", "fields": {"summary": "Summary 2"}},
+                        {
+                            "key": "PRJ-1",
+                            "fields": {
+                                "summary": "Summary 1",
+                                "issuetype": {"name": "Bug"},
+                            },
+                        },
+                        {
+                            "key": "PRJ-2",
+                            "fields": {
+                                "summary": "Summary 2",
+                                "issuetype": {"name": "Story"},
+                            },
+                        },
                     ]
                 }
             ]
@@ -106,6 +129,7 @@ def test_search_issues_falls_back_to_short_page_without_total() -> None:
     )
 
     assert [issue.key for issue in issues] == ["PRJ-1", "PRJ-2"]
+    assert [issue.issue_type for issue in issues] == ["Bug", "Story"]
 
 
 def test_payload_optional_int_and_coerce_int_handle_strings() -> None:

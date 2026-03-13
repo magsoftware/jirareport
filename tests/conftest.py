@@ -26,6 +26,7 @@ def make_worklog(
         started_at: str,
         duration_seconds: int,
         author_account_id: str | None = None,
+        issue_type: str = "Task",
     ) -> WorklogEntry:
         started = datetime.fromisoformat(started_at).astimezone(warsaw_timezone)
         ended = started + timedelta(seconds=duration_seconds)
@@ -33,6 +34,7 @@ def make_worklog(
             worklog_id=worklog_id,
             issue_key=issue_key,
             issue_summary=summary,
+            issue_type=issue_type,
             author_name=author_name,
             author_account_id=author_account_id,
             started_at=started,

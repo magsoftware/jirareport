@@ -26,6 +26,7 @@ def test_serialize_daily_snapshot_omits_fractional_seconds() -> None:
         worklog_id="1",
         issue_key="PRJ-1",
         issue_summary="Task",
+        issue_type="Bug",
         author_name="Alice",
         author_account_id="acc-1",
         started_at=datetime(2026, 3, 11, 9, 13, 12, 163000, tzinfo=timezone),
@@ -54,6 +55,7 @@ def test_serialize_daily_snapshot_omits_fractional_seconds() -> None:
     }
     assert worklog["started_at"] == "2026-03-11T09:13:12+01:00"
     assert worklog["ended_at"] == "2026-03-11T10:13:12+01:00"
+    assert worklog["issue_type"] == "Bug"
 
 
 def test_serialize_monthly_worklogs_builds_flat_rows() -> None:
@@ -62,6 +64,7 @@ def test_serialize_monthly_worklogs_builds_flat_rows() -> None:
         worklog_id="1",
         issue_key="PRJ-1",
         issue_summary="Task",
+        issue_type="Story",
         author_name="Alice",
         author_account_id="acc-1",
         started_at=datetime(2026, 3, 11, 9, 13, 12, tzinfo=timezone),
@@ -82,5 +85,6 @@ def test_serialize_monthly_worklogs_builds_flat_rows() -> None:
     assert row["space_slug"] == "project"
     assert row["report_month"] == "2026-03"
     assert row["issue_key"] == "PRJ-1"
+    assert row["issue_type"] == "Story"
     assert row["author_name"] == "Alice"
     assert row["duration_hours"] == 1.0

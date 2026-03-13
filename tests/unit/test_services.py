@@ -143,12 +143,14 @@ def test_daily_snapshot_generates_raw_and_monthly_reports(
     assert raw_payload["report_type"] == "daily_raw_snapshot"
     assert raw_payload["space"]["slug"] == "project"
     assert len(raw_payload["worklogs"]) == 3
+    assert raw_payload["worklogs"][0]["issue_type"] == "Task"
     march_payload = storage.payloads[
         "spaces/PRJ/project/derived/monthly/2026/2026-03.json"
     ]
     issue_keys = [ticket["issue_key"] for ticket in march_payload["tickets"]]
     assert issue_keys == ["PRJ-1", "PRJ-2"]
     assert len(march_payload["tickets"][0]["bookings"]) == 2
+    assert march_payload["tickets"][0]["issue_type"] == "Task"
     assert march_payload["tickets"][0]["bookings"][0]["author"] == "Alice"
     assert march_payload["tickets"][0]["bookings"][0]["started_date"] == "2026-03-01"
     assert march_payload["tickets"][0]["bookings"][0]["crosses_midnight"] is False
@@ -233,6 +235,7 @@ def test_monthly_report_filters_to_requested_month(
     payload = storage.payloads[result.report_path]
     assert payload["month"] == "2026-03"
     assert len(payload["tickets"]) == 1
+    assert payload["tickets"][0]["issue_type"] == "Task"
     assert payload["tickets"][0]["bookings"][0]["duration_hours"] == 2.0
     assert result.curated_path in storage.binary_payloads
 
@@ -343,6 +346,7 @@ def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
     assert february_tab.rows[0][0] == "snapshot_date"
     assert february_tab.rows[1][5] == "2026-02"
     assert february_tab.rows[1][6] == "PRJ-1"
+    assert february_tab.rows[1][8] == "Task"
     march_tab = request.worksheets[1]
     assert march_tab.rows[0][0] == "snapshot_date"
     assert march_tab.rows[1][5] == "2026-03"

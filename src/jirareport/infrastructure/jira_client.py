@@ -106,7 +106,7 @@ class JiraWorklogSource(WorklogSource):
         params: dict[str, RequestParamValue] = {
             "jql": jql,
             "maxResults": 100,
-            "fields": "summary",
+            "fields": "summary,issuetype",
         }
         if next_page_token:
             params["nextPageToken"] = next_page_token
@@ -192,6 +192,7 @@ def _parse_issues(payload: Mapping[str, object]) -> list[Issue]:
             Issue(
                 key=str(item["key"]),
                 summary=str(fields.get("summary") or ""),
+                issue_type=_issue_type_name(fields.get("issuetype")),
             )
         )
     return result
@@ -229,6 +230,7 @@ def _to_worklog_entry(
         worklog_id=str(worklog["id"]),
         issue_key=issue.key,
         issue_summary=issue.summary,
+        issue_type=issue.issue_type,
         author_name=str(author_payload.get("displayName") or "Unknown"),
         author_account_id=_optional_string(author_payload.get("accountId")),
         started_at=started_at,
@@ -252,6 +254,16 @@ def _optional_string(value: object) -> str | None:
     if value is None or value == "":
         return None
     return str(value)
+
+
+def _issue_type_name(value: object) -> str:
+    """Extracts the issue type name from a Jira issue payload field."""
+    if not isinstance(value, Mapping):
+        return "Unknown"
+    name = value.get("name")
+    if name in {None, ""}:
+        return "Unknown"
+    return str(name)
 
 
 def _payload_list(payload: Mapping[str, object], key: str) -> list[object]:

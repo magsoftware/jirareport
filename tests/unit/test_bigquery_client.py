@@ -88,13 +88,14 @@ def test_bigquery_warehouse_loads_month_slice_from_parquet() -> None:
         payload,
     )
 
-    assert len(client.queries) == 2
+    assert len(client.queries) == 3
     assert "worklogs" in client.tables
+    assert "ADD COLUMN IF NOT EXISTS issue_type" in client.queries[0][0]
     assert (
         "DELETE FROM `jira-report-489919.jirareport.worklogs`"
-        in client.queries[0][0]
+        in client.queries[1][0]
     )
-    assert "GROUP BY worklog_id" in client.queries[1][0]
+    assert "GROUP BY worklog_id" in client.queries[2][0]
     assert client.loads[0][0] == payload
     assert client.loads[0][1] == "jira-report-489919.jirareport.worklogs"
 
@@ -126,7 +127,7 @@ def test_bigquery_warehouse_rejects_duplicate_worklog_ids_in_curated_payload() -
 
 def test_bigquery_warehouse_rejects_duplicate_worklog_ids_after_load() -> None:
     client = FakeBigQueryClient()
-    client.query_results = [[], [{"worklog_id": "duplicate-1"}], []]
+    client.query_results = [[], [], [{"worklog_id": "duplicate-1"}], []]
     warehouse = BigQueryWorklogWarehouse(
         project_id="jira-report-489919",
         dataset="jirareport",
@@ -143,11 +144,11 @@ def test_bigquery_warehouse_rejects_duplicate_worklog_ids_after_load() -> None:
             payload,
         )
 
-    assert len(client.queries) == 3
-    assert "GROUP BY worklog_id" in client.queries[1][0]
+    assert len(client.queries) == 4
+    assert "GROUP BY worklog_id" in client.queries[2][0]
     assert (
         "DELETE FROM `jira-report-489919.jirareport.worklogs`"
-        in client.queries[2][0]
+        in client.queries[3][0]
     )
 
 
@@ -256,5 +257,6 @@ def test_reporting_views_reference_source_table() -> None:
         "FROM `jira-report-489919.jirareport.worklogs`"
         in views["all_spaces_by_issue"]
     )
+    assert "issue_type" in views["all_spaces_by_issue"]
     assert "WHERE space_slug = 'click-price'" in views["click_price_by_issue"]
     assert "WHERE space_slug = 'data-fixer'" in views["data_fixer_by_issue"]

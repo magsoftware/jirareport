@@ -38,14 +38,30 @@ def test_fetch_worklogs_handles_pagination_and_timezone_filtering() -> None:
         [
             FakeResponse(
                 {
-                    "issues": [{"key": "PRJ-1", "fields": {"summary": "First issue"}}],
+                    "issues": [
+                        {
+                            "key": "PRJ-1",
+                            "fields": {
+                                "summary": "First issue",
+                                "issuetype": {"name": "Bug"},
+                            },
+                        }
+                    ],
                     "isLast": False,
                     "nextPageToken": "page-2-token",
                 }
             ),
             FakeResponse(
                 {
-                    "issues": [{"key": "PRJ-2", "fields": {"summary": "Second issue"}}],
+                    "issues": [
+                        {
+                            "key": "PRJ-2",
+                            "fields": {
+                                "summary": "Second issue",
+                                "issuetype": {"name": "Story"},
+                            },
+                        }
+                    ],
                     "isLast": True,
                 }
             ),
@@ -88,13 +104,15 @@ def test_fetch_worklogs_handles_pagination_and_timezone_filtering() -> None:
 
     assert [entry.worklog_id for entry in result] == ["1", "3"]
     assert result[0].started_at.date().isoformat() == "2026-03-01"
+    assert result[0].issue_type == "Bug"
+    assert result[1].issue_type == "Story"
     assert result[1].author_name == "Bob"
     assert len(session.calls) == 5
     assert session.calls[1][1] == {
         "jql": 'project = "PRJ" AND worklogDate >= "2026-03-01" '
         'AND worklogDate <= "2026-03-11" ORDER BY created DESC',
         "maxResults": 100,
-        "fields": "summary",
+        "fields": "summary,issuetype",
         "nextPageToken": "page-2-token",
     }
 

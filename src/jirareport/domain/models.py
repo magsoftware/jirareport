@@ -93,6 +93,7 @@ class Issue:
 
     key: str
     summary: str
+    issue_type: str
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,7 @@ class WorklogEntry:
     worklog_id: str
     issue_key: str
     issue_summary: str
+    issue_type: str
     author_name: str
     author_account_id: str | None
     started_at: datetime
@@ -173,6 +175,7 @@ class TicketWorklogReport:
 
     issue_key: str
     summary: str
+    issue_type: str
     bookings: tuple[WorklogEntry, ...]
 
     @property

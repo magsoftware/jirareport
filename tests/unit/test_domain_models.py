@@ -32,6 +32,7 @@ def test_worklog_entry_exposes_started_and_ended_dates() -> None:
         worklog_id="1",
         issue_key="PRJ-1",
         issue_summary="Night shift",
+        issue_type="Task",
         author_name="Alice",
         author_account_id=None,
         started_at=datetime(2026, 3, 11, 23, 0, tzinfo=ZoneInfo("Europe/Warsaw")),

@@ -6,6 +6,9 @@ from jirareport.domain.models import SpreadsheetPublishRequest, WorksheetData
 from jirareport.infrastructure.google.sheets_client import (
     GoogleSheetsPublisher,
     GoogleSheetsResolver,
+    _basic_filter_request,
+    _localized_formula,
+    _number_format_requests,
 )
 
 
@@ -130,6 +133,7 @@ def test_google_sheets_publisher_creates_missing_month_tabs_and_formats_raw_colu
                         "month",
                         "issue_key",
                         "summary",
+                        "issue_type",
                         "author",
                         "author_account_id",
                         "worklog_id",
@@ -150,6 +154,7 @@ def test_google_sheets_publisher_creates_missing_month_tabs_and_formats_raw_colu
                         "2026-02",
                         "PRJ-1",
                         "Summary",
+                        "Bug",
                         "Alice",
                         "alice-1",
                         "1",
@@ -258,3 +263,21 @@ def test_google_sheets_resolver_reuses_existing_spreadsheet_id() -> None:
 
     assert target.spreadsheet_id == "sheet-2026"
     assert target.spreadsheet_url == "https://docs.google.com/spreadsheets/d/sheet-2026/edit"
+
+
+def test_localized_formula_keeps_non_formula_values_unchanged() -> None:
+    assert _localized_formula("plain text", "pl_PL") == "plain text"
+    assert _localized_formula(123, "pl_PL") == 123
+    assert _localized_formula("=SUM(A1,B1)", "en_US") == "=SUM(A1,B1)"
+
+
+def test_basic_filter_request_returns_none_for_empty_worksheet() -> None:
+    assert _basic_filter_request(1, WorksheetData("01", ())) is None
+
+
+def test_number_format_requests_skip_short_or_non_monthly_worksheets() -> None:
+    assert _number_format_requests(1, WorksheetData("01", (("header",),))) == []
+    assert _number_format_requests(
+        1,
+        WorksheetData("raw", (("header", "value"), ("a", 1))),
+    ) == []

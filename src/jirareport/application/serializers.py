@@ -27,6 +27,7 @@ def serialize_worklog(
         "worklog_id": entry.worklog_id,
         "issue_key": entry.issue_key,
         "summary": entry.issue_summary,
+        "issue_type": entry.issue_type,
         "author": entry.author_name,
         "author_account_id": entry.author_account_id,
         "started_at": _format_datetime(entry.started_at),
@@ -83,6 +84,7 @@ def serialize_monthly_report(report: MonthlyWorklogReport) -> dict[str, object]:
             {
                 "issue_key": ticket.issue_key,
                 "summary": ticket.summary,
+                "issue_type": ticket.issue_type,
                 "total_duration_hours": ticket.total_duration_hours,
                 "bookings": [serialize_worklog(entry) for entry in ticket.bookings],
             }

@@ -69,6 +69,7 @@ WORKLOGS_SCHEMA = (
     bigquery.SchemaField("worklog_id", "STRING"),
     bigquery.SchemaField("issue_key", "STRING"),
     bigquery.SchemaField("issue_summary", "STRING"),
+    bigquery.SchemaField("issue_type", "STRING"),
     bigquery.SchemaField("author_name", "STRING"),
     bigquery.SchemaField("author_account_id", "STRING"),
     bigquery.SchemaField("started_at", "STRING"),
@@ -184,6 +185,7 @@ def _ensure_worklogs_table(
     table.time_partitioning = bigquery.TimePartitioning(field="started_date")
     table.clustering_fields = ["space_slug", "author_name", "issue_key"]
     client.create_table(table, exists_ok=True)
+    _ensure_issue_type_column(client, table_ref)
 
 
 def _load_month_slice(
@@ -220,6 +222,17 @@ def _ensure_view(
     if view.view_query != query:
         view.view_query = query
         client.update_table(view, ["view_query"])
+
+
+def _ensure_issue_type_column(
+    client: BigQueryClientProtocol,
+    table_ref: str,
+) -> None:
+    """Ensures the worklogs table schema includes the issue_type column."""
+    client.query(
+        f"ALTER TABLE `{table_ref}` ADD COLUMN IF NOT EXISTS issue_type STRING",
+        job_config=bigquery.QueryJobConfig(),
+    ).result()
 
 
 def _duplicate_worklog_ids(
@@ -311,12 +324,13 @@ def _by_issue_query(table_ref: str, space_slug: str | None = None) -> str:
         "space_slug, "
         "issue_key, "
         "issue_summary, "
+        "issue_type, "
         "ROUND(SUM(duration_hours), 2) AS total_hours "
         f"FROM `{table_ref}` "
         f"{_space_filter_clause(space_slug)}"
         "GROUP BY "
         "space_key, space_name, report_month, space_slug, "
-        "issue_key, issue_summary"
+        "issue_key, issue_summary, issue_type"
     ).strip()
 
 
@@ -330,6 +344,7 @@ def _by_issue_author_query(table_ref: str, space_slug: str | None = None) -> str
         "space_slug, "
         "issue_key, "
         "issue_summary, "
+        "issue_type, "
         "author_name, "
         "author_account_id, "
         "ROUND(SUM(duration_hours), 2) AS total_hours "
@@ -337,7 +352,7 @@ def _by_issue_author_query(table_ref: str, space_slug: str | None = None) -> str
         f"{_space_filter_clause(space_slug)}"
         "GROUP BY "
         "space_key, space_name, report_month, space_slug, "
-        "issue_key, issue_summary, author_name, author_account_id"
+        "issue_key, issue_summary, issue_type, author_name, author_account_id"
     ).strip()
 
 
