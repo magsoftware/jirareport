@@ -9,9 +9,14 @@ from typing import cast
 import pytest
 
 from jirareport.domain.models import DateRange, JiraSpace, MonthId
-from jirareport.domain.ports import ReportStorage, SpreadsheetPublisher
+from jirareport.domain.ports import (
+    ReportingWarehouse,
+    ReportStorage,
+    SpreadsheetPublisher,
+)
 from jirareport.infrastructure.config import (
     AppSettings,
+    BigQuerySettings,
     JiraSettings,
     SheetsSettings,
     StorageSettings,
@@ -23,16 +28,19 @@ from jirareport.interfaces.cli import app
 @dataclass(frozen=True)
 class DailyResult:
     snapshot_path: str
+    curated_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class MonthlyResult:
     report_path: str
+    curated_path: str = "curated/worklogs.parquet"
 
 
 @dataclass(frozen=True)
 class BackfillResult:
     monthly_paths: tuple[str, ...]
+    curated_paths: tuple[str, ...]
     worklog_count: int
     month_count: int
 
@@ -80,6 +88,7 @@ class FakeBackfillService:
         self.last_window = window
         return BackfillResult(
             monthly_paths=("derived/2025-01.json", "derived/2025-02.json"),
+            curated_paths=("curated/2025-01.parquet", "curated/2025-02.parquet"),
             worklog_count=10,
             month_count=2,
         )
@@ -99,6 +108,27 @@ class FakeSheetsSyncService:
         return SyncSheetsResult(
             spreadsheet_urls=("https://docs.google.com/spreadsheets/d/sheet/edit",)
         )
+
+
+@dataclass
+class FakeBigQuerySyncService:
+    storage: object
+    warehouse: object
+    space: JiraSpace
+    last_date: date | None = None
+    last_window: DateRange | None = None
+
+    def generate(self, reference_date: date) -> object:
+        self.last_date = reference_date
+        return type("Result", (), {"months": (MonthId(year=2026, month=3),)})()
+
+    def generate_range(self, window: DateRange) -> object:
+        self.last_window = window
+        return type(
+            "Result",
+            (),
+            {"months": (MonthId(year=2025, month=1), MonthId(year=2025, month=2))},
+        )()
 
 
 def test_main_dispatches_daily_command(
@@ -199,6 +229,27 @@ def test_main_dispatches_sync_sheets_command(
     assert str(fake_sync.last_date) == "2026-03-11"
 
 
+def test_main_dispatches_sync_bigquery_command(
+    monkeypatch: pytest.MonkeyPatch,
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space())
+    fake_sync = FakeBigQuerySyncService(object(), object(), settings.spaces[0])
+    monkeypatch.setattr(app, "load_settings", lambda: settings)
+    monkeypatch.setattr(app, "configure_logging", lambda debug: None)
+    monkeypatch.setattr(app, "flush_logging", lambda: None)
+    monkeypatch.setattr(app, "_build_storage", lambda settings: object())
+    monkeypatch.setattr(app, "_build_reporting_warehouse", lambda settings: object())
+    monkeypatch.setattr(app, "BigQuerySyncService", lambda *args, **kwargs: fake_sync)
+
+    result = app.main(
+        ["sync", "bigquery", "--date", "2026-03-11", "--space", "project"]
+    )
+
+    assert result == 0
+    assert fake_sync.last_date == date(2026, 3, 11)
+
+
 def test_build_source_uses_space_project_key(
     make_space: Callable[..., JiraSpace],
 ) -> None:
@@ -239,6 +290,12 @@ def test_selected_spaces_returns_all_spaces_when_selector_missing(
             bucket_prefix="jirareport",
         ),
         sheets=SheetsSettings(enabled=True, title_prefix="Jira Worklog Analytics"),
+        bigquery=BigQuerySettings(
+            enabled=False,
+            project_id=None,
+            dataset=None,
+            table="worklogs",
+        ),
         timezone_name="Europe/Warsaw",
     )
 
@@ -274,6 +331,12 @@ def test_build_spreadsheet_helpers_reject_when_disabled(
             bucket_prefix="jirareport",
         ),
         sheets=SheetsSettings(enabled=False, title_prefix="Jira Worklog Analytics"),
+        bigquery=BigQuerySettings(
+            enabled=False,
+            project_id=None,
+            dataset=None,
+            table="worklogs",
+        ),
         timezone_name="Europe/Warsaw",
     )
 
@@ -281,6 +344,36 @@ def test_build_spreadsheet_helpers_reject_when_disabled(
         app._build_spreadsheet_publisher(settings)
     with pytest.raises(ValueError, match="Google Sheets publishing is disabled"):
         app._build_spreadsheet_resolver(settings, settings.spaces[0])
+
+
+def test_build_reporting_warehouse_rejects_when_disabled(
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = AppSettings(
+        jira=JiraSettings(
+            base_url="https://example.atlassian.net",
+            email="user@example.com",
+            api_token="secret",
+        ),
+        spaces=(make_space(),),
+        storage=StorageSettings(
+            backend="local",
+            local_output_dir=Path("reports"),
+            bucket_name=None,
+            bucket_prefix="jirareport",
+        ),
+        sheets=SheetsSettings(enabled=False, title_prefix="Jira Worklog Analytics"),
+        bigquery=BigQuerySettings(
+            enabled=False,
+            project_id=None,
+            dataset=None,
+            table="worklogs",
+        ),
+        timezone_name="Europe/Warsaw",
+    )
+
+    with pytest.raises(ValueError, match="BigQuery reporting is disabled"):
+        app._build_reporting_warehouse(settings)
 
 
 def test_run_daily_and_monthly_use_current_date_when_input_missing(
@@ -346,6 +439,33 @@ def test_run_sync_sheets_uses_current_date_when_input_missing(
     assert fake_sync.last_date == date(2026, 3, 12)
 
 
+def test_run_sync_bigquery_uses_current_date_when_input_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space())
+    fake_sync = FakeBigQuerySyncService(object(), object(), settings.spaces[0])
+    monkeypatch.setattr(app, "current_date", lambda timezone: date(2026, 3, 12))
+    monkeypatch.setattr(app, "BigQuerySyncService", lambda *args, **kwargs: fake_sync)
+
+    storage = cast(ReportStorage, object())
+    warehouse = cast(ReportingWarehouse, object())
+
+    assert (
+        app._run_sync_bigquery(
+            None,
+            None,
+            None,
+            None,
+            settings,
+            storage,
+            warehouse,
+        )
+        == 0
+    )
+    assert fake_sync.last_date == date(2026, 3, 12)
+
+
 def _settings(space: JiraSpace) -> AppSettings:
     return AppSettings(
         jira=JiraSettings(
@@ -363,6 +483,12 @@ def _settings(space: JiraSpace) -> AppSettings:
         sheets=SheetsSettings(
             enabled=True,
             title_prefix="Jira Worklog Analytics",
+        ),
+        bigquery=BigQuerySettings(
+            enabled=False,
+            project_id=None,
+            dataset=None,
+            table="worklogs",
         ),
         timezone_name="Europe/Warsaw",
     )

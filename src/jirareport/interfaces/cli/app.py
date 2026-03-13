@@ -8,12 +8,14 @@ from loguru import logger
 
 from jirareport.application.services import (
     BackfillService,
+    BigQuerySyncService,
     DailySnapshotService,
     MonthlyReportService,
     SheetsSyncService,
 )
 from jirareport.domain.models import DateRange, JiraSpace, MonthId
 from jirareport.domain.ports import (
+    ReportingWarehouse,
     ReportStorage,
     SpreadsheetPublisher,
     SpreadsheetResolver,
@@ -21,6 +23,7 @@ from jirareport.domain.ports import (
 )
 from jirareport.domain.time_range import current_date, explicit_range
 from jirareport.infrastructure.config import AppSettings, load_settings
+from jirareport.infrastructure.google.bigquery_client import BigQueryWarehouse
 from jirareport.infrastructure.google.sheets_client import (
     GoogleSheetsPublisher,
     GoogleSheetsResolver,
@@ -52,6 +55,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "monthly":
             storage = _build_storage(settings)
             return _run_monthly(args.month, args.space, settings, storage)
+        if args.sync_target == "bigquery":
+            storage = _build_storage(settings)
+            warehouse = _build_reporting_warehouse(settings)
+            return _run_sync_bigquery(
+                args.date,
+                args.from_date,
+                args.to_date,
+                args.space,
+                settings,
+                storage,
+                warehouse,
+            )
         publisher = _build_spreadsheet_publisher(settings)
         return _run_sync_sheets(args.date, args.space, settings, publisher)
     finally:
@@ -74,7 +89,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "  jirareport monthly\n"
             "  jirareport monthly --month 2026-03\n"
             "  jirareport sync sheets\n"
-            "  jirareport sync sheets --date 2026-03-11"
+            "  jirareport sync sheets --date 2026-03-11\n"
+            "  jirareport sync bigquery --date 2026-03-11"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -166,7 +182,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="sync_target",
         required=True,
         title="targets",
-        metavar="{sheets}",
+        metavar="{sheets,bigquery}",
     )
     sheets = sync_subparsers.add_parser(
         "sheets",
@@ -185,6 +201,39 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     sheets.add_argument(
+        "--space",
+        type=str,
+        help="Optional Jira space key or slug. Defaults to all configured spaces.",
+    )
+    bigquery = sync_subparsers.add_parser(
+        "bigquery",
+        help="Load curated monthly worklogs into BigQuery and refresh views.",
+        description=(
+            "Loads curated monthly worklogs into BigQuery for either the "
+            "operational reporting window or an explicit historical range."
+        ),
+    )
+    bigquery.add_argument(
+        "--date",
+        type=str,
+        help=(
+            "Operational reference date in YYYY-MM-DD format. "
+            "Defaults to the current date in REPORT_TIMEZONE."
+        ),
+    )
+    bigquery.add_argument(
+        "--from",
+        dest="from_date",
+        type=str,
+        help="Optional inclusive range start in YYYY-MM-DD format.",
+    )
+    bigquery.add_argument(
+        "--to",
+        dest="to_date",
+        type=str,
+        help="Optional inclusive range end in YYYY-MM-DD format.",
+    )
+    bigquery.add_argument(
         "--space",
         type=str,
         help="Optional Jira space key or slug. Defaults to all configured spaces.",
@@ -219,6 +268,19 @@ def _build_spreadsheet_publisher(settings: AppSettings) -> SpreadsheetPublisher:
     if not settings.sheets.enabled:
         raise ValueError("Google Sheets publishing is disabled.")
     return GoogleSheetsPublisher()
+
+
+def _build_reporting_warehouse(settings: AppSettings) -> ReportingWarehouse:
+    """Builds the configured BigQuery reporting warehouse adapter."""
+    if not settings.bigquery.enabled:
+        raise ValueError("BigQuery reporting is disabled.")
+    if settings.bigquery.project_id is None or settings.bigquery.dataset is None:
+        raise ValueError("BigQuery project and dataset must be configured.")
+    return BigQueryWarehouse(
+        project_id=settings.bigquery.project_id,
+        dataset=settings.bigquery.dataset,
+        table=settings.bigquery.table,
+    )
 
 
 def _build_spreadsheet_resolver(
@@ -363,12 +425,62 @@ def _run_sync_sheets(
     return 0
 
 
+def _run_sync_bigquery(
+    input_date: str | None,
+    input_from: str | None,
+    input_to: str | None,
+    space_selector: str | None,
+    settings: AppSettings,
+    storage: ReportStorage,
+    warehouse: ReportingWarehouse,
+) -> int:
+    """Runs the BigQuery synchronization use case."""
+    explicit_window = _explicit_window_optional(input_from, input_to)
+    if input_date and explicit_window is not None:
+        raise ValueError("Use either --date or --from/--to for BigQuery sync.")
+    if explicit_window is None:
+        if input_date:
+            reference_date = date.fromisoformat(input_date)
+        else:
+            reference_date = current_date(settings.timezone_name)
+    for space in _selected_spaces(settings, space_selector):
+        service = BigQuerySyncService(
+            storage=storage,
+            warehouse=warehouse,
+            space=space,
+        )
+        if explicit_window is None:
+            result = service.generate(reference_date)
+        else:
+            result = service.generate_range(explicit_window)
+        logger.info(
+            "Published BigQuery sync for {} across month(s): {}",
+            space.slug,
+            ", ".join(month.label() for month in result.months),
+        )
+    logger.info("Completed BigQuery sync command.")
+    flush_logging()
+    return 0
+
+
 def _explicit_window(input_from: str, input_to: str) -> DateRange:
     """Parses an explicit inclusive date range from CLI arguments."""
     return explicit_range(
         start=date.fromisoformat(input_from),
         end=date.fromisoformat(input_to),
     )
+
+
+def _explicit_window_optional(
+    input_from: str | None,
+    input_to: str | None,
+) -> DateRange | None:
+    """Returns an explicit range when both boundaries are provided."""
+    if input_from is None and input_to is None:
+        return None
+    if input_from is None or input_to is None:
+        raise ValueError("Both --from and --to are required for an explicit range.")
+    return _explicit_window(input_from, input_to)
 
 
 def _selected_spaces(

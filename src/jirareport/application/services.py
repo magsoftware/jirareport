@@ -9,6 +9,7 @@ from loguru import logger
 from jirareport.application.serializers import (
     serialize_daily_snapshot,
     serialize_monthly_report,
+    serialize_monthly_worklogs_parquet,
 )
 from jirareport.application.spreadsheets import (
     build_spreadsheet_request,
@@ -24,12 +25,18 @@ from jirareport.domain.models import (
     WorklogEntry,
 )
 from jirareport.domain.ports import (
+    ReportingWarehouse,
     ReportStorage,
     SpreadsheetPublisher,
     SpreadsheetResolver,
     WorklogSource,
 )
-from jirareport.domain.time_range import month_range, months_in_range, rolling_window
+from jirareport.domain.time_range import (
+    active_months,
+    month_range,
+    months_in_range,
+    rolling_window,
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +45,7 @@ class DailySnapshotResult:
 
     snapshot_path: str
     monthly_paths: tuple[str, ...]
+    curated_paths: tuple[str, ...]
     worklog_count: int
 
 
@@ -46,6 +54,7 @@ class MonthlyReportResult:
     """Describes the output of the monthly report use case."""
 
     report_path: str
+    curated_path: str
     ticket_count: int
     worklog_count: int
 
@@ -55,6 +64,7 @@ class BackfillResult:
     """Describes the output of the historical backfill use case."""
 
     monthly_paths: tuple[str, ...]
+    curated_paths: tuple[str, ...]
     worklog_count: int
     month_count: int
 
@@ -65,6 +75,13 @@ class SpreadsheetSyncResult:
 
     spreadsheet_urls: tuple[str, ...]
     worklog_count: int
+
+
+@dataclass(frozen=True)
+class BigQuerySyncResult:
+    """Describes the output of the BigQuery synchronization use case."""
+
+    months: tuple[MonthId, ...]
 
 
 class DailySnapshotService:
@@ -114,32 +131,52 @@ class DailySnapshotService:
             _daily_snapshot_path(self._space, reference_date),
             serialize_daily_snapshot(snapshot),
         )
-        monthly_paths = self._write_monthly_reports(worklogs, window, generated_at)
+        monthly_paths, curated_paths = self._write_monthly_reports(
+            worklogs,
+            window,
+            generated_at,
+        )
         logger.info("Generated snapshot with {} worklogs.", len(worklogs))
-        return DailySnapshotResult(snapshot_path, monthly_paths, len(worklogs))
+        return DailySnapshotResult(
+            snapshot_path,
+            monthly_paths,
+            curated_paths,
+            len(worklogs),
+        )
 
     def _write_monthly_reports(
         self,
         worklogs: list[WorklogEntry],
         window: DateRange,
         generated_at: datetime,
-    ) -> tuple[str, ...]:
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Writes derived monthly reports for every month covered by the window."""
-        paths: list[str] = []
+        report_paths: list[str] = []
+        curated_paths: list[str] = []
         for month in months_in_range(window):
+            monthly_worklogs = _worklogs_for_month(worklogs, month)
             report = _build_monthly_report(
-                worklogs,
+                monthly_worklogs,
                 self._space,
                 month,
                 generated_at,
                 self._timezone_name,
             )
-            path = self._storage.write_json(
+            report_path = self._storage.write_json(
                 _monthly_report_path(self._space, month),
                 serialize_monthly_report(report),
             )
-            paths.append(path)
-        return tuple(paths)
+            curated_path = self._storage.write_parquet(
+                _monthly_worklogs_path(self._space, month),
+                serialize_monthly_worklogs_parquet(
+                    self._space,
+                    month,
+                    monthly_worklogs,
+                ),
+            )
+            report_paths.append(report_path)
+            curated_paths.append(curated_path)
+        return tuple(report_paths), tuple(curated_paths)
 
 
 class MonthlyReportService:
@@ -175,8 +212,21 @@ class MonthlyReportService:
             _monthly_report_path(self._space, month),
             serialize_monthly_report(report),
         )
+        curated_path = self._storage.write_parquet(
+            _monthly_worklogs_path(self._space, month),
+            serialize_monthly_worklogs_parquet(
+                self._space,
+                month,
+                worklogs,
+            ),
+        )
         ticket_count = len(report.tickets)
-        return MonthlyReportResult(report_path, ticket_count, len(worklogs))
+        return MonthlyReportResult(
+            report_path,
+            curated_path,
+            ticket_count,
+            len(worklogs),
+        )
 
 
 class BackfillService:
@@ -207,19 +257,30 @@ class BackfillService:
             window.end.isoformat(),
         )
         monthly_paths: list[str] = []
+        curated_paths: list[str] = []
         for month in months_in_range(window):
+            monthly_worklogs = _worklogs_for_month(worklogs, month)
             report = _build_monthly_report(
-                worklogs,
+                monthly_worklogs,
                 self._space,
                 month,
                 generated_at,
                 self._timezone_name,
             )
-            path = self._storage.write_json(
+            report_path = self._storage.write_json(
                 _monthly_report_path(self._space, month),
                 serialize_monthly_report(report),
             )
-            monthly_paths.append(path)
+            curated_path = self._storage.write_parquet(
+                _monthly_worklogs_path(self._space, month),
+                serialize_monthly_worklogs_parquet(
+                    self._space,
+                    month,
+                    monthly_worklogs,
+                ),
+            )
+            monthly_paths.append(report_path)
+            curated_paths.append(curated_path)
         logger.info(
             (
                 "Completed historical backfill for space {} "
@@ -229,7 +290,12 @@ class BackfillService:
             len(worklogs),
             len(monthly_paths),
         )
-        return BackfillResult(tuple(monthly_paths), len(worklogs), len(monthly_paths))
+        return BackfillResult(
+            tuple(monthly_paths),
+            tuple(curated_paths),
+            len(worklogs),
+            len(monthly_paths),
+        )
 
 
 class SheetsSyncService:
@@ -302,6 +368,51 @@ class SheetsSyncService:
         return urls
 
 
+class BigQuerySyncService:
+    """Loads curated monthly worklogs into BigQuery for active reporting months."""
+
+    def __init__(
+        self,
+        storage: ReportStorage,
+        warehouse: ReportingWarehouse,
+        space: JiraSpace,
+    ) -> None:
+        """Initializes the service with storage and reporting warehouse ports."""
+        self._storage = storage
+        self._warehouse = warehouse
+        self._space = space
+
+    def generate(self, reference_date: date) -> BigQuerySyncResult:
+        """Loads the active operational months into BigQuery."""
+        months = active_months(reference_date)
+        return self._sync_months(months)
+
+    def generate_range(self, window: DateRange) -> BigQuerySyncResult:
+        """Loads every month touched by an explicit historical range."""
+        months = months_in_range(window)
+        return self._sync_months(months)
+
+    def _sync_months(self, months: tuple[MonthId, ...]) -> BigQuerySyncResult:
+        logger.info(
+            "Starting BigQuery sync for space {} across {} month(s).",
+            self._space.slug,
+            len(months),
+        )
+        for month in months:
+            payload = self._storage.read_bytes(
+                _monthly_worklogs_path(self._space, month)
+            )
+            self._warehouse.load_monthly_worklogs(self._space, month, payload)
+            logger.info(
+                "Loaded curated worklogs for space {} month {} into BigQuery.",
+                self._space.slug,
+                month.label(),
+            )
+        self._warehouse.ensure_views()
+        logger.info("Completed BigQuery sync for space {}.", self._space.slug)
+        return BigQuerySyncResult(months)
+
+
 def _build_monthly_report(
     worklogs: list[WorklogEntry],
     space: JiraSpace,
@@ -310,7 +421,7 @@ def _build_monthly_report(
     timezone_name: str,
 ) -> MonthlyWorklogReport:
     """Builds a monthly report by grouping worklogs per ticket."""
-    relevant = [entry for entry in worklogs if month.contains(entry.started_at.date())]
+    relevant = _worklogs_for_month(worklogs, month)
     tickets: dict[tuple[str, str], list[WorklogEntry]] = {}
     for entry in relevant:
         key = (entry.issue_key, entry.issue_summary)
@@ -372,6 +483,14 @@ def _sort_worklogs(worklogs: list[WorklogEntry]) -> list[WorklogEntry]:
     )
 
 
+def _worklogs_for_month(
+    worklogs: list[WorklogEntry],
+    month: MonthId,
+) -> list[WorklogEntry]:
+    """Returns only worklogs whose local start date belongs to the month."""
+    return [entry for entry in worklogs if month.contains(entry.started_at.date())]
+
+
 
 
 def _daily_snapshot_path(space: JiraSpace, reference_date: date) -> str:
@@ -387,4 +506,12 @@ def _monthly_report_path(space: JiraSpace, month: MonthId) -> str:
     return (
         f"spaces/{space.key}/{space.slug}/derived/monthly/"
         f"{month.year:04d}/{month.label()}.json"
+    )
+
+
+def _monthly_worklogs_path(space: JiraSpace, month: MonthId) -> str:
+    """Builds the storage path for a curated monthly worklog dataset."""
+    return (
+        f"spaces/{space.key}/{space.slug}/curated/worklogs/"
+        f"year={month.year:04d}/month={month.month:02d}/worklogs.parquet"
     )

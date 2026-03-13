@@ -12,6 +12,10 @@ from jirareport.infrastructure.config import load_settings
 def clear_google_sheets_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Removes local Google Sheets settings so tests stay environment-independent."""
     monkeypatch.setenv("GOOGLE_SHEETS_ENABLED", "")
+    monkeypatch.setenv("BIGQUERY_ENABLED", "")
+    monkeypatch.delenv("BIGQUERY_PROJECT_ID", raising=False)
+    monkeypatch.delenv("BIGQUERY_DATASET", raising=False)
+    monkeypatch.delenv("BIGQUERY_TABLE", raising=False)
     monkeypatch.delenv("JIRA_SPACES_CONFIG_PATH", raising=False)
     for name in tuple(os.environ):
         if name.startswith("GOOGLE_SHEETS_ID_"):
@@ -56,6 +60,7 @@ def test_load_settings_defaults_to_gcs_when_bucket_present(
     assert settings.storage.bucket_prefix == "jirareport"
     assert settings.sheets.enabled is False
     assert settings.sheets.title_prefix == "Jira Worklog Analytics"
+    assert settings.bigquery.enabled is False
     assert settings.spaces[0].key == "LA004832"
     assert settings.spaces[0].slug == "click-price"
 
@@ -104,6 +109,37 @@ def test_load_settings_enables_google_sheets_when_space_has_ids(
 
     assert settings.sheets.enabled is True
     assert settings.spaces[0].safe_google_sheets_ids == {2026: "sheet-2026"}
+
+
+def test_load_settings_enables_bigquery_when_project_and_dataset_are_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    spaces_config: Path,
+) -> None:
+    monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+    monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
+    monkeypatch.setenv("JIRA_API_TOKEN", "secret")
+    monkeypatch.setenv("BIGQUERY_PROJECT_ID", "jira-report-489919")
+    monkeypatch.setenv("BIGQUERY_DATASET", "jirareport")
+
+    settings = load_settings()
+
+    assert settings.bigquery.enabled is True
+    assert settings.bigquery.project_id == "jira-report-489919"
+    assert settings.bigquery.dataset == "jirareport"
+    assert settings.bigquery.table == "worklogs"
+
+
+def test_load_settings_rejects_unknown_bigquery_enabled_value(
+    monkeypatch: pytest.MonkeyPatch,
+    spaces_config: Path,
+) -> None:
+    monkeypatch.setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+    monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
+    monkeypatch.setenv("JIRA_API_TOKEN", "secret")
+    monkeypatch.setenv("BIGQUERY_ENABLED", "maybe")
+
+    with pytest.raises(ValueError, match="Unsupported BIGQUERY_ENABLED value"):
+        load_settings()
 
 
 def test_load_settings_rejects_unknown_google_sheets_enabled_value(

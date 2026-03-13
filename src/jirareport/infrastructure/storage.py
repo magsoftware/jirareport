@@ -9,6 +9,7 @@ from jirareport.domain.ports import ReportStorage
 
 JsonPayload = dict[str, Any]
 GcsClientFactory = Callable[[], Any]
+PARQUET_CONTENT_TYPE = "application/vnd.apache.parquet"
 
 
 class LocalJsonStorage:
@@ -24,6 +25,17 @@ class LocalJsonStorage:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(_to_json(payload), encoding="utf-8")
         return str(target)
+
+    def write_parquet(self, path: str, payload: bytes) -> str:
+        """Writes a Parquet payload to the configured local output directory."""
+        target = self._root_dir / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+        return str(target)
+
+    def read_bytes(self, path: str) -> bytes:
+        """Reads a binary payload from the configured local output directory."""
+        return (self._root_dir / path).read_bytes()
 
 
 class GcsJsonStorage:
@@ -48,6 +60,23 @@ class GcsJsonStorage:
         blob = bucket.blob(blob_name)
         blob.upload_from_string(_to_json(payload), content_type="application/json")
         return f"gs://{self._bucket_name}/{blob_name}"
+
+    def write_parquet(self, path: str, payload: bytes) -> str:
+        """Writes a Parquet payload to the configured GCS bucket."""
+        client = self._client_factory()
+        bucket = client.bucket(self._bucket_name)
+        blob_name = _blob_name(self._bucket_prefix, path)
+        blob = bucket.blob(blob_name)
+        blob.upload_from_string(payload, content_type=PARQUET_CONTENT_TYPE)
+        return f"gs://{self._bucket_name}/{blob_name}"
+
+    def read_bytes(self, path: str) -> bytes:
+        """Reads a binary payload from the configured GCS bucket."""
+        client = self._client_factory()
+        bucket = client.bucket(self._bucket_name)
+        blob_name = _blob_name(self._bucket_prefix, path)
+        blob = bucket.blob(blob_name)
+        return bytes(blob.download_as_bytes())
 
 
 def build_storage(
@@ -76,6 +105,6 @@ def _blob_name(prefix: str, path: str) -> str:
 
 def _default_gcs_client_factory() -> Any:
     """Builds the default Google Cloud Storage client."""
-    from google.cloud import storage
+    import google.cloud.storage as storage
 
     return storage.Client()

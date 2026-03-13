@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from jirareport.infrastructure.storage import (
+    PARQUET_CONTENT_TYPE,
     GcsJsonStorage,
     LocalJsonStorage,
     build_storage,
@@ -12,12 +13,16 @@ from jirareport.infrastructure.storage import (
 
 class FakeBlob:
     def __init__(self) -> None:
-        self.payload: str | None = None
+        self.payload: str | bytes | None = None
         self.content_type: str | None = None
 
-    def upload_from_string(self, payload: str, content_type: str) -> None:
+    def upload_from_string(self, payload: str | bytes, content_type: str) -> None:
         self.payload = payload
         self.content_type = content_type
+
+    def download_as_bytes(self) -> bytes:
+        assert isinstance(self.payload, bytes)
+        return self.payload
 
 
 class FakeBucket:
@@ -25,8 +30,10 @@ class FakeBucket:
         self.blobs: dict[str, FakeBlob] = {}
 
     def blob(self, name: str) -> FakeBlob:
-        blob = FakeBlob()
-        self.blobs[name] = blob
+        blob = self.blobs.get(name)
+        if blob is None:
+            blob = FakeBlob()
+            self.blobs[name] = blob
         return blob
 
 
@@ -35,8 +42,10 @@ class FakeGcsClient:
         self.buckets: dict[str, FakeBucket] = {}
 
     def bucket(self, name: str) -> FakeBucket:
-        bucket = FakeBucket()
-        self.buckets[name] = bucket
+        bucket = self.buckets.get(name)
+        if bucket is None:
+            bucket = FakeBucket()
+            self.buckets[name] = bucket
         return bucket
 
 
@@ -68,3 +77,35 @@ def test_build_storage_returns_local_backend(tmp_path: Path) -> None:
     result = storage.write_json("derived/monthly/report.json", {"ok": True})
 
     assert Path(result).exists()
+
+
+def test_local_storage_writes_parquet_bytes(tmp_path: Path) -> None:
+    storage = LocalJsonStorage(tmp_path)
+
+    target = storage.write_parquet("curated/worklogs.parquet", b"PAR1")
+
+    assert (tmp_path / "curated/worklogs.parquet").read_bytes() == b"PAR1"
+    assert Path(target).exists()
+    assert storage.read_bytes("curated/worklogs.parquet") == b"PAR1"
+
+
+def test_gcs_storage_uploads_parquet_to_bucket() -> None:
+    client = FakeGcsClient()
+    storage = GcsJsonStorage("bucket-name", "prefix", client_factory=lambda: client)
+
+    target = storage.write_parquet("curated/worklogs.parquet", b"PAR1")
+
+    blob = client.buckets["bucket-name"].blobs["prefix/curated/worklogs.parquet"]
+    assert blob.payload == b"PAR1"
+    assert blob.content_type == PARQUET_CONTENT_TYPE
+    assert target == "gs://bucket-name/prefix/curated/worklogs.parquet"
+
+
+def test_gcs_storage_reads_bytes_from_bucket() -> None:
+    client = FakeGcsClient()
+    storage = GcsJsonStorage("bucket-name", "prefix", client_factory=lambda: client)
+    storage.write_parquet("curated/worklogs.parquet", b"PAR1")
+
+    payload = storage.read_bytes("curated/worklogs.parquet")
+
+    assert payload == b"PAR1"

@@ -6,6 +6,7 @@ from typing import Any
 
 from jirareport.application.services import (
     BackfillService,
+    BigQuerySyncService,
     DailySnapshotService,
     MonthlyReportService,
     SheetsSyncService,
@@ -33,10 +34,18 @@ class FakeWorklogSource:
 class FakeStorage:
     def __init__(self) -> None:
         self.payloads: dict[str, dict[str, Any]] = {}
+        self.binary_payloads: dict[str, bytes] = {}
 
     def write_json(self, path: str, payload: dict[str, Any]) -> str:
         self.payloads[path] = payload
         return path
+
+    def write_parquet(self, path: str, payload: bytes) -> str:
+        self.binary_payloads[path] = payload
+        return path
+
+    def read_bytes(self, path: str) -> bytes:
+        return self.binary_payloads[path]
 
 
 class FakeSpreadsheetPublisher:
@@ -60,6 +69,23 @@ class FakeSpreadsheetResolver:
             spreadsheet_id=self.mapping[year],
             spreadsheet_url=f"https://docs.google.com/spreadsheets/d/{self.mapping[year]}/edit",
         )
+
+
+class FakeReportingWarehouse:
+    def __init__(self) -> None:
+        self.loads: list[tuple[str, str, bytes]] = []
+        self.views_ensured = False
+
+    def load_monthly_worklogs(
+        self,
+        space: JiraSpace,
+        month: MonthId,
+        parquet_payload: bytes,
+    ) -> None:
+        self.loads.append((space.slug, month.label(), parquet_payload))
+
+    def ensure_views(self) -> None:
+        self.views_ensured = True
 
 
 def test_daily_snapshot_generates_raw_and_monthly_reports(
@@ -107,6 +133,10 @@ def test_daily_snapshot_generates_raw_and_monthly_reports(
         "spaces/PRJ/project/derived/monthly/2026/2026-02.json",
         "spaces/PRJ/project/derived/monthly/2026/2026-03.json",
     )
+    assert result.curated_paths == (
+        "spaces/PRJ/project/curated/worklogs/year=2026/month=02/worklogs.parquet",
+        "spaces/PRJ/project/curated/worklogs/year=2026/month=03/worklogs.parquet",
+    )
     assert source.windows == [DateRange(start=date(2026, 2, 1), end=date(2026, 3, 11))]
     raw_payload = storage.payloads[result.snapshot_path]
     assert raw_payload["report_type"] == "daily_raw_snapshot"
@@ -121,6 +151,7 @@ def test_daily_snapshot_generates_raw_and_monthly_reports(
     assert march_payload["tickets"][0]["bookings"][0]["author"] == "Alice"
     assert march_payload["tickets"][0]["bookings"][0]["started_date"] == "2026-03-01"
     assert march_payload["tickets"][0]["bookings"][0]["crosses_midnight"] is False
+    assert result.curated_paths[1] in storage.binary_payloads
 
 
 def test_daily_snapshot_closes_previous_two_months_on_first_day_of_month(
@@ -157,6 +188,10 @@ def test_daily_snapshot_closes_previous_two_months_on_first_day_of_month(
         "spaces/PRJ/project/derived/monthly/2026/2026-02.json",
         "spaces/PRJ/project/derived/monthly/2026/2026-03.json",
     )
+    assert result.curated_paths == (
+        "spaces/PRJ/project/curated/worklogs/year=2026/month=02/worklogs.parquet",
+        "spaces/PRJ/project/curated/worklogs/year=2026/month=03/worklogs.parquet",
+    )
 
 
 def test_monthly_report_filters_to_requested_month(
@@ -189,11 +224,16 @@ def test_monthly_report_filters_to_requested_month(
     result = service.generate(MonthId(year=2026, month=3))
 
     assert result.report_path == "spaces/PRJ/project/derived/monthly/2026/2026-03.json"
+    assert (
+        result.curated_path
+        == "spaces/PRJ/project/curated/worklogs/year=2026/month=03/worklogs.parquet"
+    )
     assert result.ticket_count == 1
     payload = storage.payloads[result.report_path]
     assert payload["month"] == "2026-03"
     assert len(payload["tickets"]) == 1
     assert payload["tickets"][0]["bookings"][0]["duration_hours"] == 2.0
+    assert result.curated_path in storage.binary_payloads
 
 
 def test_backfill_generates_monthly_reports_for_explicit_range(
@@ -231,6 +271,10 @@ def test_backfill_generates_monthly_reports_for_explicit_range(
     assert result.monthly_paths == (
         "spaces/PRJ/project/derived/monthly/2025/2025-01.json",
         "spaces/PRJ/project/derived/monthly/2025/2025-02.json",
+    )
+    assert result.curated_paths == (
+        "spaces/PRJ/project/curated/worklogs/year=2025/month=01/worklogs.parquet",
+        "spaces/PRJ/project/curated/worklogs/year=2025/month=02/worklogs.parquet",
     )
 
 
@@ -308,3 +352,33 @@ def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
     metadata_tab = request.worksheets[3]
     assert metadata_tab.rows[1][0] == "PRJ"
     assert metadata_tab.rows[1][3] == 2026
+
+
+def test_bigquery_sync_loads_active_months_from_curated_storage(
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    storage = FakeStorage()
+    storage.binary_payloads[
+        "spaces/PRJ/project/curated/worklogs/year=2026/month=02/worklogs.parquet"
+    ] = b"feb"
+    storage.binary_payloads[
+        "spaces/PRJ/project/curated/worklogs/year=2026/month=03/worklogs.parquet"
+    ] = b"mar"
+    warehouse = FakeReportingWarehouse()
+    service = BigQuerySyncService(
+        storage=storage,
+        warehouse=warehouse,
+        space=make_space(key="PRJ", name="Project", slug="project"),
+    )
+
+    result = service.generate(date(2026, 4, 1))
+
+    assert result.months == (
+        MonthId(year=2026, month=2),
+        MonthId(year=2026, month=3),
+    )
+    assert warehouse.loads == [
+        ("project", "2026-02", b"feb"),
+        ("project", "2026-03", b"mar"),
+    ]
+    assert warehouse.views_ensured is True

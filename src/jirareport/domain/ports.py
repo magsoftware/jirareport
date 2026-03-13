@@ -4,6 +4,8 @@ from typing import Any, Protocol
 
 from jirareport.domain.models import (
     DateRange,
+    JiraSpace,
+    MonthId,
     SpreadsheetPublishRequest,
     SpreadsheetTarget,
     WorklogEntry,
@@ -23,6 +25,12 @@ class ReportStorage(Protocol):
     def write_json(self, path: str, payload: dict[str, Any]) -> str:
         """Writes JSON payload and returns the storage path."""
 
+    def write_parquet(self, path: str, payload: bytes) -> str:
+        """Writes Parquet payload and returns the storage path."""
+
+    def read_bytes(self, path: str) -> bytes:
+        """Reads a previously stored binary payload."""
+
 
 class SpreadsheetPublisher(Protocol):
     """Publishes tabular report data to a spreadsheet backend."""
@@ -36,3 +44,18 @@ class SpreadsheetResolver(Protocol):
 
     def resolve(self, year: int) -> SpreadsheetTarget:
         """Returns the spreadsheet target for the requested year."""
+
+
+class ReportingWarehouse(Protocol):
+    """Publishes curated monthly worklogs into the analytical warehouse."""
+
+    def load_monthly_worklogs(
+        self,
+        space: JiraSpace,
+        month: MonthId,
+        parquet_payload: bytes,
+    ) -> None:
+        """Loads one month's curated worklogs into the warehouse."""
+
+    def ensure_views(self) -> None:
+        """Ensures analytical reporting views exist and are up to date."""

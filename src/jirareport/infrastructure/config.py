@@ -41,6 +41,16 @@ class SheetsSettings:
 
 
 @dataclass(frozen=True)
+class BigQuerySettings:
+    """Holds BigQuery reporting configuration."""
+
+    enabled: bool
+    project_id: str | None
+    dataset: str | None
+    table: str
+
+
+@dataclass(frozen=True)
 class AppSettings:
     """Represents the full application configuration."""
 
@@ -48,6 +58,7 @@ class AppSettings:
     spaces: tuple[JiraSpace, ...]
     storage: StorageSettings
     sheets: SheetsSettings
+    bigquery: BigQuerySettings
     timezone_name: str
 
 
@@ -71,12 +82,19 @@ def load_settings() -> AppSettings:
         enabled=_sheets_enabled_from_env(spaces),
         title_prefix=os.getenv("GOOGLE_SHEETS_TITLE_PREFIX", "Jira Worklog Analytics"),
     )
+    bigquery = BigQuerySettings(
+        enabled=_bigquery_enabled_from_env(),
+        project_id=os.getenv("BIGQUERY_PROJECT_ID"),
+        dataset=os.getenv("BIGQUERY_DATASET"),
+        table=os.getenv("BIGQUERY_TABLE", "worklogs"),
+    )
     timezone_name = os.getenv("REPORT_TIMEZONE", "Europe/Warsaw")
     return AppSettings(
         jira=jira,
         spaces=spaces,
         storage=storage,
         sheets=sheets,
+        bigquery=bigquery,
         timezone_name=timezone_name,
     )
 
@@ -211,3 +229,17 @@ def _sheets_enabled_from_env(spaces: tuple[JiraSpace, ...]) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"Unsupported GOOGLE_SHEETS_ENABLED value: {raw_value}")
+
+
+def _bigquery_enabled_from_env() -> bool:
+    """Determines whether BigQuery reporting is enabled."""
+    raw_value = os.getenv("BIGQUERY_ENABLED")
+    if raw_value in {None, ""}:
+        return bool(os.getenv("BIGQUERY_PROJECT_ID") and os.getenv("BIGQUERY_DATASET"))
+    assert raw_value is not None
+    normalized = raw_value.lower().strip()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Unsupported BIGQUERY_ENABLED value: {raw_value}")

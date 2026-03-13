@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from io import BytesIO
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from jirareport.application.serializers import serialize_daily_snapshot
+import pyarrow.parquet as pq
+
+from jirareport.application.serializers import (
+    serialize_daily_snapshot,
+    serialize_monthly_worklogs_parquet,
+)
 from jirareport.domain.models import (
     DailyRawSnapshot,
     DateRange,
     JiraSpace,
+    MonthId,
     WorklogEntry,
 )
 
@@ -47,3 +54,33 @@ def test_serialize_daily_snapshot_omits_fractional_seconds() -> None:
     }
     assert worklog["started_at"] == "2026-03-11T09:13:12+01:00"
     assert worklog["ended_at"] == "2026-03-11T10:13:12+01:00"
+
+
+def test_serialize_monthly_worklogs_parquet_builds_flat_rows() -> None:
+    timezone = ZoneInfo("Europe/Warsaw")
+    entry = WorklogEntry(
+        worklog_id="1",
+        issue_key="PRJ-1",
+        issue_summary="Task",
+        author_name="Alice",
+        author_account_id="acc-1",
+        started_at=datetime(2026, 3, 11, 9, 13, 12, tzinfo=timezone),
+        ended_at=datetime(2026, 3, 11, 10, 13, 12, tzinfo=timezone),
+        duration_seconds=3600,
+    )
+
+    payload = serialize_monthly_worklogs_parquet(
+        JiraSpace(key="PRJ", name="Project", slug="project"),
+        MonthId(year=2026, month=3),
+        [entry],
+    )
+
+    table = pq.read_table(BytesIO(payload))
+    row = table.to_pylist()[0]
+
+    assert row["space_key"] == "PRJ"
+    assert row["space_slug"] == "project"
+    assert row["report_month"] == "2026-03"
+    assert row["issue_key"] == "PRJ-1"
+    assert row["author_name"] == "Alice"
+    assert row["duration_hours"] == 1.0
