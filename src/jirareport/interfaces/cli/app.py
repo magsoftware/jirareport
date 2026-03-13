@@ -392,6 +392,42 @@ def _build_spreadsheet_resolver(
     )
 
 
+def _resolve_reference_date(
+    input_date: str | None,
+    timezone_name: str,
+) -> date:
+    """Resolves a CLI date or falls back to the current reporting date."""
+    if input_date:
+        return date.fromisoformat(input_date)
+    return current_date(timezone_name)
+
+
+def _resolve_reference_date_or_window(
+    input_date: str | None,
+    input_from: str | None,
+    input_to: str | None,
+    timezone_name: str,
+    command_label: str,
+) -> tuple[date | None, DateRange | None]:
+    """Resolves either an operational reference date or an explicit range."""
+    explicit_window = _explicit_window_optional(input_from, input_to)
+    if input_date and explicit_window is not None:
+        raise ValueError(f"Use either --date or --from/--to for {command_label}.")
+    if explicit_window is not None:
+        return None, explicit_window
+    return _resolve_reference_date(input_date, timezone_name), None
+
+
+def _run_for_selected_spaces(
+    settings: AppSettings,
+    selector: str | None,
+    runner: Callable[[JiraSpace], None],
+) -> None:
+    """Executes one callback for every selected reporting space."""
+    for space in _selected_spaces(settings, selector):
+        runner(space)
+
+
 def _run_daily(
     input_date: str | None,
     space_selector: str | None,
@@ -401,12 +437,9 @@ def _run_daily(
     dataset_storage: CuratedDatasetStorage,
 ) -> int:
     """Runs the main daily use case."""
-    reference_date = (
-        date.fromisoformat(input_date)
-        if input_date
-        else current_date(settings.timezone_name)
-    )
-    for space in _selected_spaces(settings, space_selector):
+    reference_date = _resolve_reference_date(input_date, settings.timezone_name)
+
+    def run_for_space(space: JiraSpace) -> None:
         service = DailySnapshotService(
             source=source_builder(settings, space),
             report_storage=report_storage,
@@ -425,8 +458,9 @@ def _run_daily(
             result.worklog_count,
             len(result.curated_paths),
         )
+
+    _run_for_selected_spaces(settings, space_selector, run_for_space)
     logger.info("Completed daily snapshot command.")
-    flush_logging()
     return 0
 
 
@@ -441,7 +475,8 @@ def _run_backfill(
 ) -> int:
     """Runs the historical backfill use case for an explicit range."""
     window = _explicit_window(input_from, input_to)
-    for space in _selected_spaces(settings, space_selector):
+
+    def run_for_space(space: JiraSpace) -> None:
         service = BackfillService(
             source=source_builder(settings, space),
             report_storage=report_storage,
@@ -459,8 +494,9 @@ def _run_backfill(
             result.month_count,
             result.worklog_count,
         )
+
+    _run_for_selected_spaces(settings, space_selector, run_for_space)
     logger.info("Completed historical backfill command.")
-    flush_logging()
     return 0
 
 
@@ -478,7 +514,8 @@ def _run_monthly(
         if input_month
         else MonthId.from_date(current_date(settings.timezone_name))
     )
-    for space in _selected_spaces(settings, space_selector):
+
+    def run_for_space(space: JiraSpace) -> None:
         service = MonthlyReportService(
             source=source_builder(settings, space),
             report_storage=report_storage,
@@ -492,8 +529,9 @@ def _run_monthly(
             space.slug,
             result.report_path,
         )
+
+    _run_for_selected_spaces(settings, space_selector, run_for_space)
     logger.info("Completed monthly report command.")
-    flush_logging()
     return 0
 
 
@@ -507,17 +545,15 @@ def _run_sync_sheets(
     publisher: SpreadsheetPublisher,
 ) -> int:
     """Runs the Google Sheets synchronization use case."""
-    explicit_window = _explicit_window_optional(input_from, input_to)
-    if input_date and explicit_window is not None:
-        raise ValueError("Use either --date or --from/--to for Google Sheets sync.")
-    reference_date: date | None = None
-    if explicit_window is None:
-        reference_date = (
-            date.fromisoformat(input_date)
-            if input_date
-            else current_date(settings.timezone_name)
-        )
-    for space in _selected_spaces(settings, space_selector):
+    reference_date, explicit_window = _resolve_reference_date_or_window(
+        input_date=input_date,
+        input_from=input_from,
+        input_to=input_to,
+        timezone_name=settings.timezone_name,
+        command_label="Google Sheets sync",
+    )
+
+    def run_for_space(space: JiraSpace) -> None:
         service = SheetsSyncService(
             source=source_builder(settings, space),
             publisher=publisher,
@@ -536,8 +572,9 @@ def _run_sync_sheets(
             ", ".join(result.spreadsheet_urls),
             result.worklog_count,
         )
+
+    _run_for_selected_spaces(settings, space_selector, run_for_space)
     logger.info("Completed Google Sheets sync command.")
-    flush_logging()
     return 0
 
 
@@ -551,17 +588,15 @@ def _run_sync_bigquery(
     warehouse: WorklogWarehouse,
 ) -> int:
     """Runs the BigQuery synchronization use case."""
-    explicit_window = _explicit_window_optional(input_from, input_to)
-    if input_date and explicit_window is not None:
-        raise ValueError("Use either --date or --from/--to for BigQuery sync.")
-    reference_date: date | None = None
-    if explicit_window is None:
-        reference_date = (
-            date.fromisoformat(input_date)
-            if input_date
-            else current_date(settings.timezone_name)
-        )
-    for space in _selected_spaces(settings, space_selector):
+    reference_date, explicit_window = _resolve_reference_date_or_window(
+        input_date=input_date,
+        input_from=input_from,
+        input_to=input_to,
+        timezone_name=settings.timezone_name,
+        command_label="BigQuery sync",
+    )
+
+    def run_for_space(space: JiraSpace) -> None:
         service = BigQuerySyncService(
             dataset_storage=dataset_storage,
             warehouse=warehouse,
@@ -578,8 +613,9 @@ def _run_sync_bigquery(
             ", ".join(month.label() for month in result.months),
             result.worklog_count,
         )
+
+    _run_for_selected_spaces(settings, space_selector, run_for_space)
     logger.info("Completed BigQuery sync command.")
-    flush_logging()
     return 0
 
 
