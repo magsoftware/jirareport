@@ -3,6 +3,7 @@ spaces:
     name: Click Price
     slug: click-price
     google_sheets_ids:
+      2025: 1p8rlXyniDipNvEdhxVoPUFgKWVNdktrh1x4XOGkklO8
       2026: 1aK0MF9lducLJ7vrqHGN-B5IsOUZstAiUN-cr59DJuwk
 
   - key: LA009644
@@ -10,4 +11,5 @@ spaces:
     slug: data-fixer
     board_id: 1354
     google_sheets_ids:
+      2025: 1WTgaiMv1LjjtwqK2KdmXwN6QqKRMnzyLjss1HKImLKg
       2026: 1DC-Kx-7_qBqPOoe7JzPlNlGQ6plwk-EUqMLkdUYFj80
