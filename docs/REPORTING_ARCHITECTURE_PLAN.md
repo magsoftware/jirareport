@@ -40,9 +40,12 @@ Docelowy model:
 2. GitHub Actions uruchamia nightly pipeline.
 3. Pipeline pobiera worklogi z Jira.
 4. Dane sa zapisywane do Google Cloud Storage.
-5. Dane raportowe sa przechowywane w formacie Parquet.
-6. Agregacje raportowe sa liczone w DuckDB.
-7. Google Sheets jest tylko warstwa prezentacji dla biznesu.
+5. W GCS przechowujemy archiwalne snapshoty JSON oraz pelne miesieczne zbiory
+   worklogow.
+6. Miesieczne dane raportowe sa ladowane do BigQuery.
+7. Looker Studio jest docelowa warstwa raportowa i dashboardowa.
+8. Google Sheets jest tylko warstwa pomocnicza dla osob preferujacych ten
+   interfejs.
 
 ## Why This Model
 
@@ -52,7 +55,8 @@ Ten model jest lepszy od samego Google Sheets jako zrodla raportow, bo:
 - da sie odtworzyc wyliczenia z surowych danych
 - korekty za poprzedni miesiac sa obslugiwane naturalnie
 - koszt jest niski, bo nie utrzymujemy stale wlaczonej bazy danych
-- agregacje sa prostsze niz przy utrzymywaniu zlozonych formul w Sheets
+- raporty biznesowe sa liczone w BigQuery zamiast w zlozonych arkuszach
+- Looker Studio staje sie docelowym widokiem dla raportow rozliczeniowych
 
 ## Storage Layers
 
@@ -62,21 +66,17 @@ Proponowane warstwy danych:
   - archiwalne snapshoty wejscia z Jira
 - `curated`
   - oczyszczone, miesieczne worklogi gotowe do raportowania
-- `marts`
-  - gotowe, finalne zestawy raportowe do prezentacji i eksportu
+- `reporting`
+  - warstwa tabel raportowych w BigQuery
 
 ## Proposed GCS Layout
 
 ```text
 gs://BUCKET/jirareport/raw/daily/space=<slug>/year=2026/month=03/date=2026-03-12/snapshot.json
 gs://BUCKET/jirareport/curated/worklogs/space=<slug>/year=2026/month=03/worklogs.parquet
-gs://BUCKET/jirareport/marts/monthly/space=<slug>/year=2026/month=03/by_issue.parquet
-gs://BUCKET/jirareport/marts/monthly/space=<slug>/year=2026/month=03/by_issue_author.parquet
-gs://BUCKET/jirareport/marts/monthly/space=<slug>/year=2026/month=03/by_author.parquet
-gs://BUCKET/jirareport/marts/monthly/space=<slug>/year=2026/month=03/author_daily.parquet
-gs://BUCKET/jirareport/marts/monthly/space=<slug>/year=2026/month=03/team_daily.parquet
-gs://BUCKET/jirareport/marts/monthly/space=<slug>/year=2026/month=03/metadata.json
 ```
+
+Warstwa raportowa w BigQuery powinna byc budowana na bazie `curated`.
 
 ## Data Scope Per Nightly Run
 
@@ -84,9 +84,10 @@ Kazde nocne uruchomienie powinno:
 
 - pobrac dane z Jira dla miesiaca biezacego i poprzedniego
 - nadpisac `curated` dla tych dwoch miesiecy
-- przeliczyc `marts` tylko dla tych dwoch miesiecy
-- opublikowac do Google Sheets tylko te miesiace, ktore sa w aktywnym oknie
-  korekt
+- zaladowac lub odswiezyc dane raportowe w BigQuery tylko dla tych dwoch
+  miesiecy
+- opublikowac do Google Sheets tylko miesieczne raw dane dla miesiecy, ktore sa
+  w aktywnym oknie korekt
 
 Przyklad operacyjny:
 
@@ -122,7 +123,7 @@ Przykladowe kolumny:
 - `duration_hours`
 - `crosses_midnight`
 
-## Monthly Report Outputs
+## BigQuery Report Outputs
 
 Na bazie `worklogs.parquet` powinny powstawac miesieczne agregacje:
 
@@ -147,35 +148,28 @@ Opcjonalnie:
 
 ## Google Sheets Role
 
-Google Sheets powinno byc tylko warstwa prezentacji.
+Google Sheets powinno byc tylko warstwa pomocnicza i kontrolna.
 
 Rekomendowany model:
 
 - `1 spreadsheet per year per space`
-- osobne worksheety dla kazdego typu raportu i miesiaca
+- `12` worksheetow z miesiecznymi raw danymi
+- nazwy worksheetow:
+  - `01`
+  - `02`
+  - `03`
+  - ...
+  - `12`
 
-Worksheety dla miesiaca powinny byc rozdzielone per typ danych, a nie laczone
-w jednej zakladce.
-
-Przykladowy zestaw worksheetow dla stycznia:
-
-- `01_raw`
-- `01_issue`
-- `01_issue_author`
-- `01_author`
-- `01_author_daily`
-- `01_team_daily`
-
-Opcjonalne dodatkowe worksheety:
-
-- `summary`
-- `metadata`
+Kazdy worksheet miesieczny zawiera pelny miesieczny zbior worklogow.
 
 Kluczowa zasada:
 
-- miesieczne raw dane i miesieczne agregaty trafiaja do osobnych worksheetow
-- nie laczymy wielu roznych tabel raportowych w jednym worksheet
-- nie traktujemy Sheets jako glownego magazynu danych historycznych
+- Sheets nie jest zrodlem prawdy
+- Sheets nie jest glowna warstwa raportowa
+- Sheets sluzy osobom, ktore chca recznie przegladac, kopiowac albo dodatkowo
+  przetwarzac miesieczne raw dane
+- docelowe raporty biznesowe sa prezentowane w Looker Studio
 
 ## Why Not Cloud SQL First
 
@@ -185,8 +179,9 @@ jest zbyt ciezkie operacyjnie i kosztowo jak na nightly reporting.
 Na start lepsze sa:
 
 - GCS jako storage
-- Parquet jako format raportowy
-- DuckDB jako silnik agregacji batchowej
+- Parquet jako format miesiecznych danych raportowych
+- BigQuery jako warstwa raportowa
+- Looker Studio jako warstwa prezentacji
 
 ## Recommended First Implementation
 
@@ -194,23 +189,25 @@ Najprostszy etap wdrozenia:
 
 1. Zachowac archiwalne snapshoty JSON jako `raw`.
 2. Dodac zapis miesiecznych `worklogs.parquet`.
-3. Liczyc agregacje miesieczne w DuckDB.
-4. Zapisywac gotowe wyniki do `marts`.
-5. Publikowac do Google Sheets tylko miesieczne widoki potrzebne biznesowi.
+3. Ladowac miesieczne dane raportowe do BigQuery.
+4. Zbudowac raporty i dashboardy w Looker Studio.
+5. Publikowac do Google Sheets tylko miesieczne raw dane jako warstwe
+   pomocnicza.
 
 ## Definition Of "Marts"
 
-`Marts` oznacza tutaj `data marts`, czyli gotowe, wyspecjalizowane zestawy
-danych przygotowane pod konkretny cel raportowy.
+`Marts` oznacza `data marts`, czyli gotowe, wyspecjalizowane zestawy danych
+przygotowane pod konkretny cel raportowy.
 
 W tym projekcie:
 
 - `raw` to surowe dane z Jira
 - `curated` to dane oczyszczone i uporzadkowane
-- `marts` to finalne tabele raportowe, np. `by_issue` albo `by_author`
+- `reporting` to finalne tabele raportowe, np. `by_issue` albo `by_author`,
+  utrzymywane w BigQuery
 
 Najprosciej:
 
 - `raw` = co przyszlo z systemu
 - `curated` = dane przygotowane do obrobki
-- `marts` = dane gotowe do czytania przez biznes
+- `reporting` = dane gotowe do czytania przez biznes
