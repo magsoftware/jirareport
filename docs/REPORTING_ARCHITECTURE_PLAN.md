@@ -146,6 +146,40 @@ Opcjonalnie:
   - wpisy potencjalnie podejrzane, np. bardzo dlugie dni lub wpisy crossing
     midnight
 
+## BigQuery Persistence Model
+
+W BigQuery nie rekomendujemy tworzenia osobnych trwalych tabel per rok i
+miesiac dla kazdego raportu agregowanego.
+
+Najprostszy i najbardziej czytelny model:
+
+- `worklogs` jako trwała tabela z pelnym zbiorem worklogow
+- partycjonowanie po dacie, np. `started_date`
+- opcjonalne klastrowanie po `space_slug`, `author_name`, `issue_key`
+
+Agregacje typu:
+
+- `by_issue`
+- `by_issue_author`
+- `by_author`
+- `author_daily`
+- `team_daily`
+
+powinny byc utrzymywane jako widoki BigQuery liczone na biezaco.
+
+To oznacza:
+
+- trwale dane w BigQuery to tabela `worklogs`
+- raporty agregowane sa generowane dynamicznie przy odczycie
+- po korekcie danych za poprzedni miesiac widoki od razu pokazuja aktualny stan
+
+Jesli kiedys pojawi sie potrzeba optymalizacji, agregacje mozna przeniesc do:
+
+- materialized views
+- batchowo odswiezanych tabel pomocniczych
+
+Na obecna skale danych zwykle nie bedzie to potrzebne.
+
 ## Google Sheets Role
 
 Google Sheets powinno byc tylko warstwa pomocnicza i kontrolna.
@@ -193,21 +227,3 @@ Najprostszy etap wdrozenia:
 4. Zbudowac raporty i dashboardy w Looker Studio.
 5. Publikowac do Google Sheets tylko miesieczne raw dane jako warstwe
    pomocnicza.
-
-## Definition Of "Marts"
-
-`Marts` oznacza `data marts`, czyli gotowe, wyspecjalizowane zestawy danych
-przygotowane pod konkretny cel raportowy.
-
-W tym projekcie:
-
-- `raw` to surowe dane z Jira
-- `curated` to dane oczyszczone i uporzadkowane
-- `reporting` to finalne tabele raportowe, np. `by_issue` albo `by_author`,
-  utrzymywane w BigQuery
-
-Najprosciej:
-
-- `raw` = co przyszlo z systemu
-- `curated` = dane przygotowane do obrobki
-- `reporting` = dane gotowe do czytania przez biznes
