@@ -10,9 +10,10 @@ import pytest
 
 from jirareport.domain.models import DateRange, JiraSpace, MonthId
 from jirareport.domain.ports import (
-    ReportingWarehouse,
-    ReportStorage,
+    CuratedDatasetStorage,
+    JsonReportStorage,
     SpreadsheetPublisher,
+    WorklogWarehouse,
 )
 from jirareport.infrastructure.config import (
     AppSettings,
@@ -53,7 +54,8 @@ class SyncSheetsResult:
 @dataclass
 class FakeDailyService:
     source: object
-    storage: object
+    report_storage: object
+    dataset_storage: object
     space: JiraSpace
     timezone_name: str
     last_date: date | None = None
@@ -66,7 +68,8 @@ class FakeDailyService:
 @dataclass
 class FakeMonthlyService:
     source: object
-    storage: object
+    report_storage: object
+    dataset_storage: object
     space: JiraSpace
     timezone_name: str
     last_month: MonthId | None = None
@@ -79,7 +82,8 @@ class FakeMonthlyService:
 @dataclass
 class FakeBackfillService:
     source: object
-    storage: object
+    report_storage: object
+    dataset_storage: object
     space: JiraSpace
     timezone_name: str
     last_window: object | None = None
@@ -136,12 +140,23 @@ def test_main_dispatches_daily_command(
     make_space: Callable[..., JiraSpace],
 ) -> None:
     settings = _settings(make_space())
-    fake_daily = FakeDailyService(None, None, settings.spaces[0], "Europe/Warsaw")
+    fake_daily = FakeDailyService(
+        None,
+        None,
+        None,
+        settings.spaces[0],
+        "Europe/Warsaw",
+    )
     monkeypatch.setattr(app, "load_settings", lambda: settings)
     monkeypatch.setattr(app, "configure_logging", lambda debug: None)
     monkeypatch.setattr(app, "flush_logging", lambda: None)
     monkeypatch.setattr(app, "_build_source", lambda settings, space: object())
-    monkeypatch.setattr(app, "_build_storage", lambda settings: object())
+    monkeypatch.setattr(app, "_build_json_report_storage", lambda settings: object())
+    monkeypatch.setattr(
+        app,
+        "_build_curated_dataset_storage",
+        lambda settings: object(),
+    )
     monkeypatch.setattr(app, "DailySnapshotService", lambda *args, **kwargs: fake_daily)
 
     result = app.main(["daily", "--date", "2026-03-11", "--space", "project"])
@@ -155,12 +170,23 @@ def test_main_dispatches_monthly_command(
     make_space: Callable[..., JiraSpace],
 ) -> None:
     settings = _settings(make_space())
-    fake_monthly = FakeMonthlyService(None, None, settings.spaces[0], "Europe/Warsaw")
+    fake_monthly = FakeMonthlyService(
+        None,
+        None,
+        None,
+        settings.spaces[0],
+        "Europe/Warsaw",
+    )
     monkeypatch.setattr(app, "load_settings", lambda: settings)
     monkeypatch.setattr(app, "configure_logging", lambda debug: None)
     monkeypatch.setattr(app, "flush_logging", lambda: None)
     monkeypatch.setattr(app, "_build_source", lambda settings, space: object())
-    monkeypatch.setattr(app, "_build_storage", lambda settings: object())
+    monkeypatch.setattr(app, "_build_json_report_storage", lambda settings: object())
+    monkeypatch.setattr(
+        app,
+        "_build_curated_dataset_storage",
+        lambda settings: object(),
+    )
     monkeypatch.setattr(
         app,
         "MonthlyReportService",
@@ -179,12 +205,23 @@ def test_main_dispatches_backfill_command(
     make_space: Callable[..., JiraSpace],
 ) -> None:
     settings = _settings(make_space())
-    fake_backfill = FakeBackfillService(None, None, settings.spaces[0], "Europe/Warsaw")
+    fake_backfill = FakeBackfillService(
+        None,
+        None,
+        None,
+        settings.spaces[0],
+        "Europe/Warsaw",
+    )
     monkeypatch.setattr(app, "load_settings", lambda: settings)
     monkeypatch.setattr(app, "configure_logging", lambda debug: None)
     monkeypatch.setattr(app, "flush_logging", lambda: None)
     monkeypatch.setattr(app, "_build_source", lambda settings, space: object())
-    monkeypatch.setattr(app, "_build_storage", lambda settings: object())
+    monkeypatch.setattr(app, "_build_json_report_storage", lambda settings: object())
+    monkeypatch.setattr(
+        app,
+        "_build_curated_dataset_storage",
+        lambda settings: object(),
+    )
     monkeypatch.setattr(
         app,
         "BackfillService",
@@ -238,8 +275,12 @@ def test_main_dispatches_sync_bigquery_command(
     monkeypatch.setattr(app, "load_settings", lambda: settings)
     monkeypatch.setattr(app, "configure_logging", lambda debug: None)
     monkeypatch.setattr(app, "flush_logging", lambda: None)
-    monkeypatch.setattr(app, "_build_storage", lambda settings: object())
-    monkeypatch.setattr(app, "_build_reporting_warehouse", lambda settings: object())
+    monkeypatch.setattr(
+        app,
+        "_build_curated_dataset_storage",
+        lambda settings: object(),
+    )
+    monkeypatch.setattr(app, "_build_worklog_warehouse", lambda settings: object())
     monkeypatch.setattr(app, "BigQuerySyncService", lambda *args, **kwargs: fake_sync)
 
     result = app.main(
@@ -346,7 +387,7 @@ def test_build_spreadsheet_helpers_reject_when_disabled(
         app._build_spreadsheet_resolver(settings, settings.spaces[0])
 
 
-def test_build_reporting_warehouse_rejects_when_disabled(
+def test_build_worklog_warehouse_rejects_when_disabled(
     make_space: Callable[..., JiraSpace],
 ) -> None:
     settings = AppSettings(
@@ -373,7 +414,163 @@ def test_build_reporting_warehouse_rejects_when_disabled(
     )
 
     with pytest.raises(ValueError, match="BigQuery reporting is disabled"):
-        app._build_reporting_warehouse(settings)
+        app._build_worklog_warehouse(settings)
+
+
+def test_build_storage_helpers_delegate_to_infrastructure_builder(
+    monkeypatch: pytest.MonkeyPatch,
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space())
+    captured_calls: list[tuple[str, Path, str | None, str]] = []
+
+    def fake_build_json_storage(
+        backend: str,
+        root_dir: Path,
+        bucket_name: str | None,
+        prefix: str,
+    ) -> object:
+        captured_calls.append((backend, root_dir, bucket_name, prefix))
+        return object()
+
+    def fake_build_dataset_storage(
+        backend: str,
+        root_dir: Path,
+        bucket_name: str | None,
+        prefix: str,
+    ) -> object:
+        captured_calls.append((backend, root_dir, bucket_name, prefix))
+        return object()
+
+    monkeypatch.setattr(app, "build_json_report_storage", fake_build_json_storage)
+    monkeypatch.setattr(
+        app,
+        "build_curated_dataset_storage",
+        fake_build_dataset_storage,
+    )
+
+    json_storage = app._build_json_report_storage(settings)
+    dataset_storage = app._build_curated_dataset_storage(settings)
+
+    assert json_storage is not None
+    assert dataset_storage is not None
+    assert captured_calls == [
+        ("local", Path("reports"), None, "jirareport"),
+        ("local", Path("reports"), None, "jirareport"),
+    ]
+
+
+def test_build_spreadsheet_helpers_return_configured_adapters(
+    monkeypatch: pytest.MonkeyPatch,
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space(google_sheets_ids={2026: "sheet-2026"}))
+    created: dict[str, object] = {}
+
+    class FakePublisher:
+        pass
+
+    class FakeResolver:
+        def __init__(self, spreadsheet_ids: dict[int, str], title_prefix: str) -> None:
+            created["spreadsheet_ids"] = spreadsheet_ids
+            created["title_prefix"] = title_prefix
+
+    monkeypatch.setattr(app, "GoogleSheetsPublisher", FakePublisher)
+    monkeypatch.setattr(app, "GoogleSheetsResolver", FakeResolver)
+
+    publisher = app._build_spreadsheet_publisher(settings)
+    resolver = app._build_spreadsheet_resolver(settings, settings.spaces[0])
+
+    assert isinstance(publisher, FakePublisher)
+    assert isinstance(resolver, FakeResolver)
+    assert created == {
+        "spreadsheet_ids": {2026: "sheet-2026"},
+        "title_prefix": "Jira Worklog Analytics - Project",
+    }
+
+
+def test_build_worklog_warehouse_rejects_missing_project_or_dataset(
+    monkeypatch: pytest.MonkeyPatch,
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space())
+    settings = AppSettings(
+        jira=settings.jira,
+        spaces=settings.spaces,
+        storage=settings.storage,
+        sheets=settings.sheets,
+        bigquery=BigQuerySettings(
+            enabled=True,
+            project_id=None,
+            dataset="jirareport",
+            table="worklogs",
+        ),
+        timezone_name=settings.timezone_name,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="BigQuery project and dataset must be configured",
+    ):
+        app._build_worklog_warehouse(settings)
+
+    settings = AppSettings(
+        jira=settings.jira,
+        spaces=settings.spaces,
+        storage=settings.storage,
+        sheets=settings.sheets,
+        bigquery=BigQuerySettings(
+            enabled=True,
+            project_id="jira-report-489919",
+            dataset=None,
+            table="worklogs",
+        ),
+        timezone_name=settings.timezone_name,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="BigQuery project and dataset must be configured",
+    ):
+        app._build_worklog_warehouse(settings)
+
+
+def test_build_worklog_warehouse_returns_bigquery_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space())
+    settings = AppSettings(
+        jira=settings.jira,
+        spaces=settings.spaces,
+        storage=settings.storage,
+        sheets=settings.sheets,
+        bigquery=BigQuerySettings(
+            enabled=True,
+            project_id="jira-report-489919",
+            dataset="jirareport",
+            table="monthly_worklogs",
+        ),
+        timezone_name=settings.timezone_name,
+    )
+    captured: dict[str, str] = {}
+
+    class FakeWarehouse:
+        def __init__(self, project_id: str, dataset: str, table: str) -> None:
+            captured["project_id"] = project_id
+            captured["dataset"] = dataset
+            captured["table"] = table
+
+    monkeypatch.setattr(app, "BigQueryWorklogWarehouse", FakeWarehouse)
+
+    warehouse = app._build_worklog_warehouse(settings)
+
+    assert isinstance(warehouse, FakeWarehouse)
+    assert captured == {
+        "project_id": "jira-report-489919",
+        "dataset": "jirareport",
+        "table": "monthly_worklogs",
+    }
 
 
 def test_run_daily_and_monthly_use_current_date_when_input_missing(
@@ -381,8 +578,20 @@ def test_run_daily_and_monthly_use_current_date_when_input_missing(
     make_space: Callable[..., JiraSpace],
 ) -> None:
     settings = _settings(make_space())
-    fake_daily = FakeDailyService(None, None, settings.spaces[0], "Europe/Warsaw")
-    fake_monthly = FakeMonthlyService(None, None, settings.spaces[0], "Europe/Warsaw")
+    fake_daily = FakeDailyService(
+        None,
+        None,
+        None,
+        settings.spaces[0],
+        "Europe/Warsaw",
+    )
+    fake_monthly = FakeMonthlyService(
+        None,
+        None,
+        None,
+        settings.spaces[0],
+        "Europe/Warsaw",
+    )
     monkeypatch.setattr(app, "current_date", lambda timezone: date(2026, 3, 12))
     monkeypatch.setattr(app, "_build_source", lambda settings, space: object())
     monkeypatch.setattr(
@@ -396,10 +605,31 @@ def test_run_daily_and_monthly_use_current_date_when_input_missing(
         lambda *args, **kwargs: fake_monthly,
     )
 
-    storage = cast(ReportStorage, object())
+    report_storage = cast(JsonReportStorage, object())
+    dataset_storage = cast(CuratedDatasetStorage, object())
 
-    assert app._run_daily(None, None, settings, storage) == 0
-    assert app._run_monthly(None, None, settings, storage) == 0
+    assert (
+        app._run_daily(
+            None,
+            None,
+            settings,
+            app._build_source,
+            report_storage,
+            dataset_storage,
+        )
+        == 0
+    )
+    assert (
+        app._run_monthly(
+            None,
+            None,
+            settings,
+            app._build_source,
+            report_storage,
+            dataset_storage,
+        )
+        == 0
+    )
     assert fake_daily.last_date == date(2026, 3, 12)
     assert fake_monthly.last_month is not None
     assert fake_monthly.last_month.label() == "2026-03"
@@ -410,6 +640,16 @@ def test_explicit_window_parses_cli_range() -> None:
         start=date(2025, 1, 1),
         end=date(2025, 12, 31),
     )
+
+
+def test_explicit_window_optional_handles_missing_or_partial_boundaries() -> None:
+    assert app._explicit_window_optional(None, None) is None
+
+    with pytest.raises(ValueError, match="Both --from and --to are required"):
+        app._explicit_window_optional("2025-01-01", None)
+
+    with pytest.raises(ValueError, match="Both --from and --to are required"):
+        app._explicit_window_optional(None, "2025-12-31")
 
 
 def test_run_sync_sheets_uses_current_date_when_input_missing(
@@ -435,7 +675,16 @@ def test_run_sync_sheets_uses_current_date_when_input_missing(
 
     publisher = cast(SpreadsheetPublisher, object())
 
-    assert app._run_sync_sheets(None, None, settings, publisher) == 0
+    assert (
+        app._run_sync_sheets(
+            None,
+            None,
+            settings,
+            app._build_source,
+            publisher,
+        )
+        == 0
+    )
     assert fake_sync.last_date == date(2026, 3, 12)
 
 
@@ -448,8 +697,8 @@ def test_run_sync_bigquery_uses_current_date_when_input_missing(
     monkeypatch.setattr(app, "current_date", lambda timezone: date(2026, 3, 12))
     monkeypatch.setattr(app, "BigQuerySyncService", lambda *args, **kwargs: fake_sync)
 
-    storage = cast(ReportStorage, object())
-    warehouse = cast(ReportingWarehouse, object())
+    dataset_storage = cast(CuratedDatasetStorage, object())
+    warehouse = cast(WorklogWarehouse, object())
 
     assert (
         app._run_sync_bigquery(
@@ -458,12 +707,60 @@ def test_run_sync_bigquery_uses_current_date_when_input_missing(
             None,
             None,
             settings,
-            storage,
+            dataset_storage,
             warehouse,
         )
         == 0
     )
     assert fake_sync.last_date == date(2026, 3, 12)
+
+
+def test_run_sync_bigquery_uses_explicit_range_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space())
+    fake_sync = FakeBigQuerySyncService(object(), object(), settings.spaces[0])
+    monkeypatch.setattr(app, "BigQuerySyncService", lambda *args, **kwargs: fake_sync)
+
+    dataset_storage = cast(CuratedDatasetStorage, object())
+    warehouse = cast(WorklogWarehouse, object())
+
+    assert (
+        app._run_sync_bigquery(
+            None,
+            "2025-01-01",
+            "2025-12-31",
+            None,
+            settings,
+            dataset_storage,
+            warehouse,
+        )
+        == 0
+    )
+    assert fake_sync.last_window == DateRange(
+        start=date(2025, 1, 1),
+        end=date(2025, 12, 31),
+    )
+
+
+def test_run_sync_bigquery_rejects_date_and_explicit_range_together(
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space())
+    dataset_storage = cast(CuratedDatasetStorage, object())
+    warehouse = cast(WorklogWarehouse, object())
+
+    with pytest.raises(ValueError, match="Use either --date or --from/--to"):
+        app._run_sync_bigquery(
+            "2026-03-11",
+            "2025-01-01",
+            "2025-12-31",
+            None,
+            settings,
+            dataset_storage,
+            warehouse,
+        )
 
 
 def _settings(space: JiraSpace) -> AppSettings:

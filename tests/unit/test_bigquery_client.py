@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from jirareport.domain.models import JiraSpace, MonthId
 from jirareport.infrastructure.google.bigquery_client import (
-    BigQueryWarehouse,
-    _reporting_views,
+    BigQueryWorklogWarehouse,
+    _reporting_view_queries,
 )
 
 
@@ -28,10 +30,18 @@ class FakeBigQueryClient:
     def load_table_from_file(
         self,
         file_obj: Any,
-        destination: str,
-        job_config: Any,
-        rewind: bool,
+        destination: Any,
+        rewind: bool = False,
+        size: int | None = None,
+        num_retries: int = 6,
+        job_id: str | None = None,
+        job_id_prefix: str | None = None,
+        location: str | None = None,
+        project: str | None = None,
+        job_config: Any = None,
+        timeout: float | tuple[float, float] | None = None,
     ) -> FakeJob:
+        del size, num_retries, job_id, job_id_prefix, location, project, timeout
         assert rewind is True
         self.loads.append((file_obj.read(), destination, job_config))
         return FakeJob()
@@ -48,7 +58,7 @@ class FakeBigQueryClient:
 
 def test_bigquery_warehouse_loads_month_slice_from_parquet() -> None:
     client = FakeBigQueryClient()
-    warehouse = BigQueryWarehouse(
+    warehouse = BigQueryWorklogWarehouse(
         project_id="jira-report-489919",
         dataset="jirareport",
         table="worklogs",
@@ -72,7 +82,7 @@ def test_bigquery_warehouse_loads_month_slice_from_parquet() -> None:
 
 def test_bigquery_warehouse_ensures_reporting_views() -> None:
     client = FakeBigQueryClient()
-    warehouse = BigQueryWarehouse(
+    warehouse = BigQueryWorklogWarehouse(
         project_id="jira-report-489919",
         dataset="jirareport",
         table="worklogs",
@@ -90,8 +100,58 @@ def test_bigquery_warehouse_ensures_reporting_views() -> None:
     }
 
 
+def test_bigquery_warehouse_updates_existing_view_when_query_changes() -> None:
+    existing_view = type(
+        "View",
+        (),
+        {"table_id": "by_issue", "view_query": "SELECT 1"},
+    )()
+
+    class ExistingViewBigQueryClient(FakeBigQueryClient):
+        def create_table(self, table: Any, exists_ok: bool) -> Any:
+            assert exists_ok is True
+            self.tables[table.table_id] = existing_view
+            return existing_view
+
+    client = ExistingViewBigQueryClient()
+    warehouse = BigQueryWorklogWarehouse(
+        project_id="jira-report-489919",
+        dataset="jirareport",
+        table="worklogs",
+        client_factory=lambda: client,
+    )
+
+    warehouse.ensure_views()
+
+    assert "by_issue" in client.updated
+
+
+def test_bigquery_warehouse_uses_google_client_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_projects: list[str] = []
+
+    class FakeClient:
+        def __init__(self, project: str) -> None:
+            created_projects.append(project)
+
+    monkeypatch.setattr(
+        "jirareport.infrastructure.google.bigquery_client.bigquery.Client",
+        FakeClient,
+    )
+    warehouse = BigQueryWorklogWarehouse(
+        project_id="jira-report-489919",
+        dataset="jirareport",
+    )
+
+    client = warehouse._default_client_factory()
+
+    assert created_projects == ["jira-report-489919"]
+    assert isinstance(client, FakeClient)
+
+
 def test_reporting_views_reference_source_table() -> None:
-    views = _reporting_views("jira-report-489919.jirareport.worklogs")
+    views = _reporting_view_queries("jira-report-489919.jirareport.worklogs")
 
     assert "by_issue" in views
     assert "FROM `jira-report-489919.jirareport.worklogs`" in views["by_issue"]

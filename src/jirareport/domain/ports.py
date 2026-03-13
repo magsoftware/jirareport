@@ -19,11 +19,15 @@ class WorklogSource(Protocol):
         """Fetches worklogs for the provided date window."""
 
 
-class ReportStorage(Protocol):
-    """Persists serialized report payloads to a target storage backend."""
+class JsonReportStorage(Protocol):
+    """Persists JSON report payloads to a target storage backend."""
 
     def write_json(self, path: str, payload: dict[str, Any]) -> str:
         """Writes JSON payload and returns the storage path."""
+
+
+class CuratedDatasetStorage(Protocol):
+    """Persists and loads curated binary datasets used for reporting."""
 
     def write_parquet(self, path: str, payload: bytes) -> str:
         """Writes Parquet payload and returns the storage path."""
@@ -46,7 +50,7 @@ class SpreadsheetResolver(Protocol):
         """Returns the spreadsheet target for the requested year."""
 
 
-class ReportingWarehouse(Protocol):
+class WorklogWarehouse(Protocol):
     """Publishes curated monthly worklogs into the analytical warehouse."""
 
     def load_monthly_worklogs(

@@ -71,7 +71,7 @@ class FakeSpreadsheetResolver:
         )
 
 
-class FakeReportingWarehouse:
+class FakeWorklogWarehouse:
     def __init__(self) -> None:
         self.loads: list[tuple[str, str, bytes]] = []
         self.views_ensured = False
@@ -121,7 +121,7 @@ def test_daily_snapshot_generates_raw_and_monthly_reports(
     source = FakeWorklogSource(worklogs)
     storage = FakeStorage()
     space = make_space(key="PRJ", name="Project", slug="project")
-    service = DailySnapshotService(source, storage, space, "Europe/Warsaw")
+    service = DailySnapshotService(source, storage, storage, space, "Europe/Warsaw")
 
     result = service.generate(date(2026, 3, 11))
 
@@ -179,7 +179,7 @@ def test_daily_snapshot_closes_previous_two_months_on_first_day_of_month(
     source = FakeWorklogSource(worklogs)
     storage = FakeStorage()
     space = make_space(key="PRJ", name="Project", slug="project")
-    service = DailySnapshotService(source, storage, space, "Europe/Warsaw")
+    service = DailySnapshotService(source, storage, storage, space, "Europe/Warsaw")
 
     result = service.generate(date(2026, 4, 1))
 
@@ -219,7 +219,7 @@ def test_monthly_report_filters_to_requested_month(
     source = FakeWorklogSource(worklogs)
     storage = FakeStorage()
     space = make_space(key="PRJ", name="Project", slug="project")
-    service = MonthlyReportService(source, storage, space, "Europe/Warsaw")
+    service = MonthlyReportService(source, storage, storage, space, "Europe/Warsaw")
 
     result = service.generate(MonthId(year=2026, month=3))
 
@@ -261,7 +261,7 @@ def test_backfill_generates_monthly_reports_for_explicit_range(
     source = FakeWorklogSource(worklogs)
     storage = FakeStorage()
     space = make_space(key="PRJ", name="Project", slug="project")
-    service = BackfillService(source, storage, space, "Europe/Warsaw")
+    service = BackfillService(source, storage, storage, space, "Europe/Warsaw")
 
     result = service.generate(DateRange(start=date(2025, 1, 1), end=date(2025, 2, 28)))
 
@@ -364,9 +364,9 @@ def test_bigquery_sync_loads_active_months_from_curated_storage(
     storage.binary_payloads[
         "spaces/PRJ/project/curated/worklogs/year=2026/month=03/worklogs.parquet"
     ] = b"mar"
-    warehouse = FakeReportingWarehouse()
+    warehouse = FakeWorklogWarehouse()
     service = BigQuerySyncService(
-        storage=storage,
+        dataset_storage=storage,
         warehouse=warehouse,
         space=make_space(key="PRJ", name="Project", slug="project"),
     )

@@ -6,10 +6,10 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from jirareport.application.parquet_serializers import serialize_monthly_worklogs
 from jirareport.application.serializers import (
     serialize_daily_snapshot,
     serialize_monthly_report,
-    serialize_monthly_worklogs_parquet,
 )
 from jirareport.application.spreadsheets import (
     build_spreadsheet_request,
@@ -25,11 +25,12 @@ from jirareport.domain.models import (
     WorklogEntry,
 )
 from jirareport.domain.ports import (
-    ReportingWarehouse,
-    ReportStorage,
+    CuratedDatasetStorage,
+    JsonReportStorage,
     SpreadsheetPublisher,
     SpreadsheetResolver,
     WorklogSource,
+    WorklogWarehouse,
 )
 from jirareport.domain.time_range import (
     active_months,
@@ -95,13 +96,15 @@ class DailySnapshotService:
     def __init__(
         self,
         source: WorklogSource,
-        storage: ReportStorage,
+        report_storage: JsonReportStorage,
+        dataset_storage: CuratedDatasetStorage,
         space: JiraSpace,
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting dependencies."""
         self._source = source
-        self._storage = storage
+        self._report_storage = report_storage
+        self._dataset_storage = dataset_storage
         self._space = space
         self._timezone = ZoneInfo(timezone_name)
         self._timezone_name = timezone_name
@@ -127,7 +130,7 @@ class DailySnapshotService:
             timezone_name=self._timezone_name,
             worklogs=tuple(worklogs),
         )
-        snapshot_path = self._storage.write_json(
+        snapshot_path = self._report_storage.write_json(
             _daily_snapshot_path(self._space, reference_date),
             serialize_daily_snapshot(snapshot),
         )
@@ -162,13 +165,13 @@ class DailySnapshotService:
                 generated_at,
                 self._timezone_name,
             )
-            report_path = self._storage.write_json(
+            report_path = self._report_storage.write_json(
                 _monthly_report_path(self._space, month),
                 serialize_monthly_report(report),
             )
-            curated_path = self._storage.write_parquet(
+            curated_path = self._dataset_storage.write_parquet(
                 _monthly_worklogs_path(self._space, month),
-                serialize_monthly_worklogs_parquet(
+                serialize_monthly_worklogs(
                     self._space,
                     month,
                     monthly_worklogs,
@@ -185,13 +188,15 @@ class MonthlyReportService:
     def __init__(
         self,
         source: WorklogSource,
-        storage: ReportStorage,
+        report_storage: JsonReportStorage,
+        dataset_storage: CuratedDatasetStorage,
         space: JiraSpace,
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting dependencies."""
         self._source = source
-        self._storage = storage
+        self._report_storage = report_storage
+        self._dataset_storage = dataset_storage
         self._space = space
         self._timezone = ZoneInfo(timezone_name)
         self._timezone_name = timezone_name
@@ -208,13 +213,13 @@ class MonthlyReportService:
             generated_at,
             self._timezone_name,
         )
-        report_path = self._storage.write_json(
+        report_path = self._report_storage.write_json(
             _monthly_report_path(self._space, month),
             serialize_monthly_report(report),
         )
-        curated_path = self._storage.write_parquet(
+        curated_path = self._dataset_storage.write_parquet(
             _monthly_worklogs_path(self._space, month),
-            serialize_monthly_worklogs_parquet(
+            serialize_monthly_worklogs(
                 self._space,
                 month,
                 worklogs,
@@ -235,13 +240,15 @@ class BackfillService:
     def __init__(
         self,
         source: WorklogSource,
-        storage: ReportStorage,
+        report_storage: JsonReportStorage,
+        dataset_storage: CuratedDatasetStorage,
         space: JiraSpace,
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting dependencies."""
         self._source = source
-        self._storage = storage
+        self._report_storage = report_storage
+        self._dataset_storage = dataset_storage
         self._space = space
         self._timezone = ZoneInfo(timezone_name)
         self._timezone_name = timezone_name
@@ -267,13 +274,13 @@ class BackfillService:
                 generated_at,
                 self._timezone_name,
             )
-            report_path = self._storage.write_json(
+            report_path = self._report_storage.write_json(
                 _monthly_report_path(self._space, month),
                 serialize_monthly_report(report),
             )
-            curated_path = self._storage.write_parquet(
+            curated_path = self._dataset_storage.write_parquet(
                 _monthly_worklogs_path(self._space, month),
-                serialize_monthly_worklogs_parquet(
+                serialize_monthly_worklogs(
                     self._space,
                     month,
                     monthly_worklogs,
@@ -373,12 +380,12 @@ class BigQuerySyncService:
 
     def __init__(
         self,
-        storage: ReportStorage,
-        warehouse: ReportingWarehouse,
+        dataset_storage: CuratedDatasetStorage,
+        warehouse: WorklogWarehouse,
         space: JiraSpace,
     ) -> None:
         """Initializes the service with storage and reporting warehouse ports."""
-        self._storage = storage
+        self._dataset_storage = dataset_storage
         self._warehouse = warehouse
         self._space = space
 
@@ -399,7 +406,7 @@ class BigQuerySyncService:
             len(months),
         )
         for month in months:
-            payload = self._storage.read_bytes(
+            payload = self._dataset_storage.read_bytes(
                 _monthly_worklogs_path(self._space, month)
             )
             self._warehouse.load_monthly_worklogs(self._space, month, payload)

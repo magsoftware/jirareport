@@ -5,14 +5,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from jirareport.domain.ports import ReportStorage
+from jirareport.domain.ports import CuratedDatasetStorage, JsonReportStorage
 
 JsonPayload = dict[str, Any]
 GcsClientFactory = Callable[[], Any]
 PARQUET_CONTENT_TYPE = "application/vnd.apache.parquet"
 
 
-class LocalJsonStorage:
+class LocalJsonReportStorage:
     """Stores report payloads as JSON files on the local filesystem."""
 
     def __init__(self, root_dir: Path) -> None:
@@ -26,6 +26,14 @@ class LocalJsonStorage:
         target.write_text(_to_json(payload), encoding="utf-8")
         return str(target)
 
+
+class LocalCuratedDatasetStorage:
+    """Stores curated binary datasets on the local filesystem."""
+
+    def __init__(self, root_dir: Path) -> None:
+        """Initializes the local curated dataset backend."""
+        self._root_dir = root_dir
+
     def write_parquet(self, path: str, payload: bytes) -> str:
         """Writes a Parquet payload to the configured local output directory."""
         target = self._root_dir / path
@@ -38,7 +46,7 @@ class LocalJsonStorage:
         return (self._root_dir / path).read_bytes()
 
 
-class GcsJsonStorage:
+class GcsJsonReportStorage:
     """Stores report payloads as JSON objects in Google Cloud Storage."""
 
     def __init__(
@@ -61,6 +69,21 @@ class GcsJsonStorage:
         blob.upload_from_string(_to_json(payload), content_type="application/json")
         return f"gs://{self._bucket_name}/{blob_name}"
 
+
+class GcsCuratedDatasetStorage:
+    """Stores curated binary datasets in Google Cloud Storage."""
+
+    def __init__(
+        self,
+        bucket_name: str,
+        bucket_prefix: str,
+        client_factory: GcsClientFactory | None = None,
+    ) -> None:
+        """Initializes the GCS curated dataset backend."""
+        self._bucket_name = bucket_name
+        self._bucket_prefix = bucket_prefix.strip("/")
+        self._client_factory = client_factory or _default_gcs_client_factory
+
     def write_parquet(self, path: str, payload: bytes) -> str:
         """Writes a Parquet payload to the configured GCS bucket."""
         client = self._client_factory()
@@ -79,18 +102,35 @@ class GcsJsonStorage:
         return bytes(blob.download_as_bytes())
 
 
-def build_storage(
+def build_json_report_storage(
     backend: str,
     root_dir: Path,
     bucket_name: str | None,
     prefix: str,
-) -> ReportStorage:
-    """Builds the configured storage backend for report persistence."""
+) -> JsonReportStorage:
+    """Builds the configured storage backend for JSON report persistence."""
     if backend == "gcs":
         if bucket_name is None:
             raise ValueError("GCS bucket name is required for gcs backend.")
-        return GcsJsonStorage(bucket_name=bucket_name, bucket_prefix=prefix)
-    return LocalJsonStorage(root_dir=root_dir)
+        return GcsJsonReportStorage(bucket_name=bucket_name, bucket_prefix=prefix)
+    return LocalJsonReportStorage(root_dir=root_dir)
+
+
+def build_curated_dataset_storage(
+    backend: str,
+    root_dir: Path,
+    bucket_name: str | None,
+    prefix: str,
+) -> CuratedDatasetStorage:
+    """Builds the configured storage backend for curated binary datasets."""
+    if backend == "gcs":
+        if bucket_name is None:
+            raise ValueError("GCS bucket name is required for gcs backend.")
+        return GcsCuratedDatasetStorage(
+            bucket_name=bucket_name,
+            bucket_prefix=prefix,
+        )
+    return LocalCuratedDatasetStorage(root_dir=root_dir)
 
 
 def _to_json(payload: JsonPayload) -> str:

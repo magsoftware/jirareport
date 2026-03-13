@@ -10,9 +10,11 @@ import pytest
 from jirareport.infrastructure import storage
 
 
-def test_build_storage_rejects_missing_bucket_for_gcs(tmp_path: Path) -> None:
+def test_storage_builders_reject_missing_bucket_for_gcs(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="GCS bucket name is required"):
-        storage.build_storage("gcs", tmp_path, None, "prefix")
+        storage.build_json_report_storage("gcs", tmp_path, None, "prefix")
+    with pytest.raises(ValueError, match="GCS bucket name is required"):
+        storage.build_curated_dataset_storage("gcs", tmp_path, None, "prefix")
 
 
 def test_default_gcs_client_factory_uses_google_storage_client(

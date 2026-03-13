@@ -5,9 +5,12 @@ from pathlib import Path
 
 from jirareport.infrastructure.storage import (
     PARQUET_CONTENT_TYPE,
-    GcsJsonStorage,
-    LocalJsonStorage,
-    build_storage,
+    GcsCuratedDatasetStorage,
+    GcsJsonReportStorage,
+    LocalCuratedDatasetStorage,
+    LocalJsonReportStorage,
+    build_curated_dataset_storage,
+    build_json_report_storage,
 )
 
 
@@ -50,7 +53,7 @@ class FakeGcsClient:
 
 
 def test_local_storage_writes_pretty_json(tmp_path: Path) -> None:
-    storage = LocalJsonStorage(tmp_path)
+    storage = LocalJsonReportStorage(tmp_path)
 
     target = storage.write_json("raw/daily/report.json", {"hello": "world"})
 
@@ -61,7 +64,11 @@ def test_local_storage_writes_pretty_json(tmp_path: Path) -> None:
 
 def test_gcs_storage_uploads_json_to_bucket() -> None:
     client = FakeGcsClient()
-    storage = GcsJsonStorage("bucket-name", "prefix", client_factory=lambda: client)
+    storage = GcsJsonReportStorage(
+        "bucket-name",
+        "prefix",
+        client_factory=lambda: client,
+    )
 
     target = storage.write_json("raw/daily/report.json", {"hello": "world"})
 
@@ -71,8 +78,8 @@ def test_gcs_storage_uploads_json_to_bucket() -> None:
     assert target == "gs://bucket-name/prefix/raw/daily/report.json"
 
 
-def test_build_storage_returns_local_backend(tmp_path: Path) -> None:
-    storage = build_storage("local", tmp_path, None, "ignored")
+def test_build_json_report_storage_returns_local_backend(tmp_path: Path) -> None:
+    storage = build_json_report_storage("local", tmp_path, None, "ignored")
 
     result = storage.write_json("derived/monthly/report.json", {"ok": True})
 
@@ -80,7 +87,7 @@ def test_build_storage_returns_local_backend(tmp_path: Path) -> None:
 
 
 def test_local_storage_writes_parquet_bytes(tmp_path: Path) -> None:
-    storage = LocalJsonStorage(tmp_path)
+    storage = LocalCuratedDatasetStorage(tmp_path)
 
     target = storage.write_parquet("curated/worklogs.parquet", b"PAR1")
 
@@ -91,7 +98,11 @@ def test_local_storage_writes_parquet_bytes(tmp_path: Path) -> None:
 
 def test_gcs_storage_uploads_parquet_to_bucket() -> None:
     client = FakeGcsClient()
-    storage = GcsJsonStorage("bucket-name", "prefix", client_factory=lambda: client)
+    storage = GcsCuratedDatasetStorage(
+        "bucket-name",
+        "prefix",
+        client_factory=lambda: client,
+    )
 
     target = storage.write_parquet("curated/worklogs.parquet", b"PAR1")
 
@@ -103,9 +114,21 @@ def test_gcs_storage_uploads_parquet_to_bucket() -> None:
 
 def test_gcs_storage_reads_bytes_from_bucket() -> None:
     client = FakeGcsClient()
-    storage = GcsJsonStorage("bucket-name", "prefix", client_factory=lambda: client)
+    storage = GcsCuratedDatasetStorage(
+        "bucket-name",
+        "prefix",
+        client_factory=lambda: client,
+    )
     storage.write_parquet("curated/worklogs.parquet", b"PAR1")
 
     payload = storage.read_bytes("curated/worklogs.parquet")
 
     assert payload == b"PAR1"
+
+
+def test_build_curated_dataset_storage_returns_local_backend(tmp_path: Path) -> None:
+    storage = build_curated_dataset_storage("local", tmp_path, None, "ignored")
+
+    target = storage.write_parquet("curated/worklogs.parquet", b"PAR1")
+
+    assert Path(target).exists()

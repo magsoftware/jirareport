@@ -7,9 +7,9 @@ from zoneinfo import ZoneInfo
 
 import pyarrow.parquet as pq
 
+from jirareport.application.parquet_serializers import serialize_monthly_worklogs
 from jirareport.application.serializers import (
     serialize_daily_snapshot,
-    serialize_monthly_worklogs_parquet,
 )
 from jirareport.domain.models import (
     DailyRawSnapshot,
@@ -56,7 +56,7 @@ def test_serialize_daily_snapshot_omits_fractional_seconds() -> None:
     assert worklog["ended_at"] == "2026-03-11T10:13:12+01:00"
 
 
-def test_serialize_monthly_worklogs_parquet_builds_flat_rows() -> None:
+def test_serialize_monthly_worklogs_builds_flat_rows() -> None:
     timezone = ZoneInfo("Europe/Warsaw")
     entry = WorklogEntry(
         worklog_id="1",
@@ -69,7 +69,7 @@ def test_serialize_monthly_worklogs_parquet_builds_flat_rows() -> None:
         duration_seconds=3600,
     )
 
-    payload = serialize_monthly_worklogs_parquet(
+    payload = serialize_monthly_worklogs(
         JiraSpace(key="PRJ", name="Project", slug="project"),
         MonthId(year=2026, month=3),
         [entry],
