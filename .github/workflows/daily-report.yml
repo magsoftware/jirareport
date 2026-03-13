@@ -46,7 +46,6 @@ jobs:
       BIGQUERY_PROJECT_ID: ${{ vars.BIGQUERY_PROJECT_ID }}
       BIGQUERY_DATASET: ${{ vars.BIGQUERY_DATASET }}
       BIGQUERY_TABLE: ${{ vars.BIGQUERY_TABLE || 'worklogs' }}
-      RUN_LOG_DIR: ${{ runner.temp }}/jirareport-logs
 
     steps:
       - name: Checkout repository
@@ -87,7 +86,9 @@ jobs:
         run: uv sync --group dev
 
       - name: Prepare workflow logs
-        run: mkdir -p "$RUN_LOG_DIR"
+        run: |
+          echo "RUN_LOG_DIR=$RUNNER_TEMP/jirareport-logs" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/jirareport-logs"
 
       - name: Generate reporting datasets
         id: generate_datasets
