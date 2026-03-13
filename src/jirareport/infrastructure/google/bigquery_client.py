@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Callable, Iterable
 from io import BytesIO
@@ -87,12 +88,14 @@ class BigQueryWorklogWarehouse:
         self,
         project_id: str,
         dataset: str,
+        spaces: tuple[JiraSpace, ...],
         table: str = "worklogs",
         client_factory: BigQueryClientFactory | None = None,
     ) -> None:
         """Initializes the reporting warehouse client and target metadata."""
         self._project_id = project_id
         self._dataset = dataset
+        self._spaces = spaces
         self._table = table
         self._client_factory = client_factory or self._default_client_factory
 
@@ -131,7 +134,10 @@ class BigQueryWorklogWarehouse:
     def ensure_views(self) -> None:
         """Creates or refreshes the reporting views built on top of worklogs."""
         client = self._client_factory()
-        for view_name, query in _reporting_view_queries(self._table_ref).items():
+        for view_name, query in _reporting_view_queries(
+            self._table_ref,
+            self._spaces,
+        ).items():
             _ensure_view(client, self._dataset_ref, view_name, query)
 
     @property
@@ -259,81 +265,149 @@ def _duplicate_worklog_ids_in_parquet(parquet_payload: bytes) -> list[str]:
     return duplicates[:10]
 
 
-def _reporting_view_queries(table_ref: str) -> dict[str, str]:
-    """Returns SQL definitions for the BigQuery reporting views."""
-    return {
-        "by_issue": _by_issue_view_query(table_ref),
-        "by_issue_author": _by_issue_author_view_query(table_ref),
-        "by_author": _by_author_view_query(table_ref),
-        "author_daily": _author_daily_view_query(table_ref),
-        "team_daily": _team_daily_view_query(table_ref),
+def _reporting_view_queries(
+    table_ref: str,
+    spaces: tuple[JiraSpace, ...],
+) -> dict[str, str]:
+    """Builds all analytical view queries for global and per-space reporting."""
+    queries = {
+        "all_spaces_worklogs": _worklogs_query(table_ref),
+        "all_spaces_by_issue": _by_issue_query(table_ref),
+        "all_spaces_by_issue_author": _by_issue_author_query(table_ref),
+        "all_spaces_by_author": _by_author_query(table_ref),
+        "all_spaces_author_daily": _author_daily_query(table_ref),
+        "all_spaces_team_daily": _team_daily_query(table_ref),
     }
+    for space in spaces:
+        prefix = _space_view_prefix(space.slug)
+        queries[f"{prefix}_worklogs"] = _worklogs_query(table_ref, space.slug)
+        queries[f"{prefix}_by_issue"] = _by_issue_query(table_ref, space.slug)
+        queries[f"{prefix}_by_issue_author"] = _by_issue_author_query(
+            table_ref,
+            space.slug,
+        )
+        queries[f"{prefix}_by_author"] = _by_author_query(table_ref, space.slug)
+        queries[f"{prefix}_author_daily"] = _author_daily_query(table_ref, space.slug)
+        queries[f"{prefix}_team_daily"] = _team_daily_query(table_ref, space.slug)
+    return queries
 
 
-def _by_issue_view_query(table_ref: str) -> str:
-    """Builds the SQL query for the by-issue reporting view."""
+def _worklogs_query(table_ref: str, space_slug: str | None = None) -> str:
+    """Builds the raw worklogs view query."""
+    return (
+        "SELECT * "
+        f"FROM `{table_ref}` "
+        f"{_space_filter_clause(space_slug)}"
+    ).strip()
+
+
+def _by_issue_query(table_ref: str, space_slug: str | None = None) -> str:
+    """Builds the hours-by-issue aggregation query."""
     return (
         "SELECT "
-        "space_key, space_name, space_slug, report_month, "
-        "issue_key, issue_summary, "
+        "space_key, "
+        "space_name, "
+        "report_month, "
+        "space_slug, "
+        "issue_key, "
+        "issue_summary, "
         "ROUND(SUM(duration_hours), 2) AS total_hours "
         f"FROM `{table_ref}` "
-        "GROUP BY space_key, space_name, space_slug, report_month, "
+        f"{_space_filter_clause(space_slug)}"
+        "GROUP BY "
+        "space_key, space_name, report_month, space_slug, "
         "issue_key, issue_summary"
-    )
+    ).strip()
 
 
-def _by_issue_author_view_query(table_ref: str) -> str:
-    """Builds the SQL query for the by-issue-author reporting view."""
+def _by_issue_author_query(table_ref: str, space_slug: str | None = None) -> str:
+    """Builds the hours-by-issue-and-author aggregation query."""
     return (
         "SELECT "
-        "space_key, space_name, space_slug, report_month, "
-        "issue_key, issue_summary, author_name, author_account_id, "
+        "space_key, "
+        "space_name, "
+        "report_month, "
+        "space_slug, "
+        "issue_key, "
+        "issue_summary, "
+        "author_name, "
+        "author_account_id, "
         "ROUND(SUM(duration_hours), 2) AS total_hours "
         f"FROM `{table_ref}` "
+        f"{_space_filter_clause(space_slug)}"
         "GROUP BY "
-        "space_key, space_name, space_slug, report_month, "
+        "space_key, space_name, report_month, space_slug, "
         "issue_key, issue_summary, author_name, author_account_id"
-    )
+    ).strip()
 
 
-def _by_author_view_query(table_ref: str) -> str:
-    """Builds the SQL query for the by-author reporting view."""
+def _by_author_query(table_ref: str, space_slug: str | None = None) -> str:
+    """Builds the hours-by-author aggregation query."""
     return (
         "SELECT "
-        "space_key, space_name, space_slug, report_month, "
-        "author_name, author_account_id, "
+        "space_key, "
+        "space_name, "
+        "report_month, "
+        "space_slug, "
+        "author_name, "
+        "author_account_id, "
         "ROUND(SUM(duration_hours), 2) AS total_hours "
         f"FROM `{table_ref}` "
+        f"{_space_filter_clause(space_slug)}"
         "GROUP BY "
-        "space_key, space_name, space_slug, report_month, "
+        "space_key, space_name, report_month, space_slug, "
         "author_name, author_account_id"
-    )
+    ).strip()
 
 
-def _author_daily_view_query(table_ref: str) -> str:
-    """Builds the SQL query for the author-daily reporting view."""
+def _author_daily_query(table_ref: str, space_slug: str | None = None) -> str:
+    """Builds the per-author daily aggregation query."""
     return (
         "SELECT "
-        "space_key, space_name, space_slug, report_month, "
-        "started_date AS date, author_name, author_account_id, "
+        "started_date AS date, "
+        "space_key, "
+        "space_name, "
+        "report_month, "
+        "space_slug, "
+        "author_name, "
+        "author_account_id, "
         "ROUND(SUM(duration_hours), 2) AS total_hours "
         f"FROM `{table_ref}` "
+        f"{_space_filter_clause(space_slug)}"
         "GROUP BY "
-        "space_key, space_name, space_slug, report_month, "
-        "date, author_name, author_account_id"
-    )
+        "date, space_key, space_name, report_month, space_slug, "
+        "author_name, author_account_id"
+    ).strip()
 
 
-def _team_daily_view_query(table_ref: str) -> str:
-    """Builds the SQL query for the team-daily reporting view."""
+def _team_daily_query(table_ref: str, space_slug: str | None = None) -> str:
+    """Builds the per-day team aggregation query."""
     return (
         "SELECT "
-        "space_key, space_name, space_slug, report_month, "
-        "started_date AS date, author_name, author_account_id, "
+        "started_date AS date, "
+        "space_key, "
+        "space_name, "
+        "report_month, "
+        "space_slug, "
+        "author_name, "
+        "author_account_id, "
         "ROUND(SUM(duration_hours), 2) AS total_hours "
         f"FROM `{table_ref}` "
+        f"{_space_filter_clause(space_slug)}"
         "GROUP BY "
-        "space_key, space_name, space_slug, report_month, "
-        "date, author_name, author_account_id"
-    )
+        "date, space_key, space_name, report_month, space_slug, "
+        "author_name, author_account_id"
+    ).strip()
+
+
+def _space_filter_clause(space_slug: str | None) -> str:
+    """Returns an optional SQL filter clause for one reporting space."""
+    if space_slug is None:
+        return ""
+    return f"WHERE space_slug = '{space_slug}' "
+
+
+def _space_view_prefix(space_slug: str) -> str:
+    """Normalizes a space slug into a BigQuery-safe view name prefix."""
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", space_slug).strip("_").lower()
+    return normalized

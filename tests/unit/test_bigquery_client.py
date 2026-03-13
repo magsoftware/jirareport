@@ -76,6 +76,7 @@ def test_bigquery_warehouse_loads_month_slice_from_parquet() -> None:
     warehouse = BigQueryWorklogWarehouse(
         project_id="jira-report-489919",
         dataset="jirareport",
+        spaces=(JiraSpace(key="PRJ", name="Project", slug="project"),),
         table="worklogs",
         client_factory=lambda: client,
     )
@@ -103,6 +104,7 @@ def test_bigquery_warehouse_rejects_duplicate_worklog_ids_in_curated_payload() -
     warehouse = BigQueryWorklogWarehouse(
         project_id="jira-report-489919",
         dataset="jirareport",
+        spaces=(JiraSpace(key="PRJ", name="Project", slug="project"),),
         table="worklogs",
         client_factory=lambda: client,
     )
@@ -128,6 +130,7 @@ def test_bigquery_warehouse_rejects_duplicate_worklog_ids_after_load() -> None:
     warehouse = BigQueryWorklogWarehouse(
         project_id="jira-report-489919",
         dataset="jirareport",
+        spaces=(JiraSpace(key="PRJ", name="Project", slug="project"),),
         table="worklogs",
         client_factory=lambda: client,
     )
@@ -153,6 +156,10 @@ def test_bigquery_warehouse_ensures_reporting_views() -> None:
     warehouse = BigQueryWorklogWarehouse(
         project_id="jira-report-489919",
         dataset="jirareport",
+        spaces=(
+            JiraSpace(key="LA004832", name="Click Price", slug="click-price"),
+            JiraSpace(key="LA009644", name="Data Fixer", slug="data-fixer"),
+        ),
         table="worklogs",
         client_factory=lambda: client,
     )
@@ -160,11 +167,24 @@ def test_bigquery_warehouse_ensures_reporting_views() -> None:
     warehouse.ensure_views()
 
     assert set(client.tables) == {
-        "by_issue",
-        "by_issue_author",
-        "by_author",
-        "author_daily",
-        "team_daily",
+        "all_spaces_worklogs",
+        "all_spaces_by_issue",
+        "all_spaces_by_issue_author",
+        "all_spaces_by_author",
+        "all_spaces_author_daily",
+        "all_spaces_team_daily",
+        "click_price_worklogs",
+        "click_price_by_issue",
+        "click_price_by_issue_author",
+        "click_price_by_author",
+        "click_price_author_daily",
+        "click_price_team_daily",
+        "data_fixer_worklogs",
+        "data_fixer_by_issue",
+        "data_fixer_by_issue_author",
+        "data_fixer_by_author",
+        "data_fixer_author_daily",
+        "data_fixer_team_daily",
     }
 
 
@@ -172,7 +192,7 @@ def test_bigquery_warehouse_updates_existing_view_when_query_changes() -> None:
     existing_view = type(
         "View",
         (),
-        {"table_id": "by_issue", "view_query": "SELECT 1"},
+        {"table_id": "project_by_issue", "view_query": "SELECT 1"},
     )()
 
     class ExistingViewBigQueryClient(FakeBigQueryClient):
@@ -185,13 +205,14 @@ def test_bigquery_warehouse_updates_existing_view_when_query_changes() -> None:
     warehouse = BigQueryWorklogWarehouse(
         project_id="jira-report-489919",
         dataset="jirareport",
+        spaces=(JiraSpace(key="PRJ", name="Project", slug="project"),),
         table="worklogs",
         client_factory=lambda: client,
     )
 
     warehouse.ensure_views()
 
-    assert "by_issue" in client.updated
+    assert "project_by_issue" in client.updated
 
 
 def test_bigquery_warehouse_uses_google_client_factory(
@@ -210,6 +231,7 @@ def test_bigquery_warehouse_uses_google_client_factory(
     warehouse = BigQueryWorklogWarehouse(
         project_id="jira-report-489919",
         dataset="jirareport",
+        spaces=(),
     )
 
     client = warehouse._default_client_factory()
@@ -219,7 +241,20 @@ def test_bigquery_warehouse_uses_google_client_factory(
 
 
 def test_reporting_views_reference_source_table() -> None:
-    views = _reporting_view_queries("jira-report-489919.jirareport.worklogs")
+    views = _reporting_view_queries(
+        "jira-report-489919.jirareport.worklogs",
+        (
+            JiraSpace(key="LA004832", name="Click Price", slug="click-price"),
+            JiraSpace(key="LA009644", name="Data Fixer", slug="data-fixer"),
+        ),
+    )
 
-    assert "by_issue" in views
-    assert "FROM `jira-report-489919.jirareport.worklogs`" in views["by_issue"]
+    assert "all_spaces_by_issue" in views
+    assert "click_price_by_issue" in views
+    assert "data_fixer_by_issue" in views
+    assert (
+        "FROM `jira-report-489919.jirareport.worklogs`"
+        in views["all_spaces_by_issue"]
+    )
+    assert "WHERE space_slug = 'click-price'" in views["click_price_by_issue"]
+    assert "WHERE space_slug = 'data-fixer'" in views["data_fixer_by_issue"]

@@ -373,6 +373,7 @@ def _build_worklog_warehouse(settings: AppSettings) -> WorklogWarehouse:
     return BigQueryWorklogWarehouse(
         project_id=settings.bigquery.project_id,
         dataset=settings.bigquery.dataset,
+        spaces=settings.spaces,
         table=settings.bigquery.table,
     )
 

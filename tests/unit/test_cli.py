@@ -571,12 +571,19 @@ def test_build_worklog_warehouse_returns_bigquery_adapter(
         ),
         timezone_name=settings.timezone_name,
     )
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     class FakeWarehouse:
-        def __init__(self, project_id: str, dataset: str, table: str) -> None:
+        def __init__(
+            self,
+            project_id: str,
+            dataset: str,
+            spaces: tuple[JiraSpace, ...],
+            table: str,
+        ) -> None:
             captured["project_id"] = project_id
             captured["dataset"] = dataset
+            captured["spaces"] = spaces
             captured["table"] = table
 
     monkeypatch.setattr(app, "BigQueryWorklogWarehouse", FakeWarehouse)
@@ -587,6 +594,7 @@ def test_build_worklog_warehouse_returns_bigquery_adapter(
     assert captured == {
         "project_id": "jira-report-489919",
         "dataset": "jirareport",
+        "spaces": settings.spaces,
         "table": "monthly_worklogs",
     }
 
