@@ -12,8 +12,11 @@ from jirareport.infrastructure.google.bigquery_client import (
 
 
 class FakeJob:
-    def result(self) -> None:
-        return None
+    def __init__(self, response: Any = None) -> None:
+        self._response = response
+
+    def result(self) -> Any:
+        return self._response
 
 
 class FakeBigQueryClient:
@@ -22,10 +25,12 @@ class FakeBigQueryClient:
         self.loads: list[tuple[bytes, str, Any]] = []
         self.tables: dict[str, Any] = {}
         self.updated: list[str] = []
+        self.query_results: list[Any] = []
 
     def query(self, query: str, job_config: Any) -> FakeJob:
         self.queries.append((query, job_config))
-        return FakeJob()
+        response = self.query_results.pop(0) if self.query_results else []
+        return FakeJob(response)
 
     def load_table_from_file(
         self,
@@ -71,13 +76,38 @@ def test_bigquery_warehouse_loads_month_slice_from_parquet() -> None:
         b"PAR1",
     )
 
-    assert len(client.queries) == 1
+    assert len(client.queries) == 2
     assert (
         "DELETE FROM `jira-report-489919.jirareport.worklogs`"
         in client.queries[0][0]
     )
+    assert "GROUP BY worklog_id" in client.queries[1][0]
     assert client.loads[0][0] == b"PAR1"
     assert client.loads[0][1] == "jira-report-489919.jirareport.worklogs"
+
+
+def test_bigquery_warehouse_rejects_duplicate_worklog_ids_in_loaded_slice() -> None:
+    client = FakeBigQueryClient()
+    client.query_results = [[], [{"worklog_id": "duplicate-1"}], []]
+    warehouse = BigQueryWorklogWarehouse(
+        project_id="jira-report-489919",
+        dataset="jirareport",
+        table="worklogs",
+        client_factory=lambda: client,
+    )
+
+    with pytest.raises(ValueError, match="Duplicate worklog_id values detected"):
+        warehouse.load_monthly_worklogs(
+            JiraSpace(key="PRJ", name="Project", slug="project"),
+            MonthId(year=2026, month=3),
+            b"PAR1",
+        )
+
+    assert len(client.queries) == 3
+    assert (
+        "DELETE FROM `jira-report-489919.jirareport.worklogs`"
+        in client.queries[2][0]
+    )
 
 
 def test_bigquery_warehouse_ensures_reporting_views() -> None:

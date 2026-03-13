@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from jirareport.domain.models import SpreadsheetPublishRequest, WorksheetData
 from jirareport.infrastructure.google.sheets_client import (
@@ -62,7 +62,7 @@ class FakeSpreadsheetsApi:
             "sheets": [
                 {"properties": {"title": title, "sheetId": sheet_id}}
                 for title, sheet_id in self.sheet_ids.items()
-            ]
+            ],
         }
         return FakeRequest(response)
 
@@ -110,67 +110,121 @@ class FakeSheetsService:
         return self.spreadsheets_api
 
 
-def test_google_sheets_publisher_creates_missing_tabs_rewrites_values_and_formats(
+def test_google_sheets_publisher_creates_missing_month_tabs_and_formats_raw_columns(
 ) -> None:
-    service = FakeSheetsService(["raw_worklogs"], locale="en_US")
+    service = FakeSheetsService(["02"], locale="en_US")
     publisher = GoogleSheetsPublisher(service_factory=lambda: service)
     request = SpreadsheetPublishRequest(
         year=2026,
         spreadsheet_id="sheet-2026",
         worksheets=(
-            WorksheetData("raw_worklogs", (("h1", "h2"), ("a", 1))),
             WorksheetData(
-                "monthly_summary",
+                "02",
                 (
-                    ("m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"),
-                    ("2026-03", "PRJ-1", "Summary", "Alice", "alice-1", 2, 3600, 1.0),
                     (
-                        "VISIBLE_TOTALS",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "=SUBTOTAL(109,F2:F2)",
-                        "=SUBTOTAL(109,G2:G2)",
-                        "=SUBTOTAL(109,H2:H2)",
+                        "snapshot_date",
+                        "window_start",
+                        "window_end",
+                        "generated_at",
+                        "timezone",
+                        "month",
+                        "issue_key",
+                        "summary",
+                        "author",
+                        "author_account_id",
+                        "worklog_id",
+                        "started_at",
+                        "ended_at",
+                        "started_date",
+                        "ended_date",
+                        "crosses_midnight",
+                        "duration_seconds",
+                        "duration_hours",
+                    ),
+                    (
+                        "2026-03-12",
+                        "2026-02-01",
+                        "2026-03-12",
+                        "2026-03-12T01:05:00+01:00",
+                        "Europe/Warsaw",
+                        "2026-02",
+                        "PRJ-1",
+                        "Summary",
+                        "Alice",
+                        "alice-1",
+                        "1",
+                        "2026-02-03T09:00:00+01:00",
+                        "2026-02-03T10:00:00+01:00",
+                        "2026-02-03",
+                        "2026-02-03",
+                        "FALSE",
+                        3600,
+                        1.0,
                     ),
                 ),
             ),
+            WorksheetData("03", (("h1", "h2"),)),
         ),
     )
 
     result = publisher.publish(request)
 
-    assert service.spreadsheets_api.created_tabs == ["monthly_summary"]
+    assert service.spreadsheets_api.created_tabs == ["03"]
     assert service.spreadsheets_api.values_api.cleared == [
-        ("sheet-2026", "raw_worklogs"),
-        ("sheet-2026", "monthly_summary"),
+        ("sheet-2026", "02"),
+        ("sheet-2026", "03"),
     ]
-    assert service.spreadsheets_api.values_api.updated == [
-        ("sheet-2026", "raw_worklogs!A1", [["h1", "h2"], ["a", 1]]),
-        (
-            "sheet-2026",
-            "monthly_summary!A1",
-            [
-                ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"],
-                ["2026-03", "PRJ-1", "Summary", "Alice", "alice-1", 2, 3600, 1.0],
-                [
-                    "VISIBLE_TOTALS",
-                    "",
-                    "",
-                    "",
-                    "",
-                    "=SUBTOTAL(109,F2:F2)",
-                    "=SUBTOTAL(109,G2:G2)",
-                    "=SUBTOTAL(109,H2:H2)",
-                ],
-            ],
-        ),
+    assert service.spreadsheets_api.values_api.updated[0][0:2] == (
+        "sheet-2026",
+        "02!A1",
+    )
+    formatting_requests = [
+        request_item
+        for batch in service.spreadsheets_api.batch_updates
+        for request_item in cast(list[dict[str, object]], batch["requests"])
     ]
-    formatting_requests = service.spreadsheets_api.batch_updates[-1]["requests"]
-    assert isinstance(formatting_requests, list)
+    repeat_cell_requests = [
+        cast(dict[str, Any], request_item["repeatCell"])
+        for request_item in formatting_requests
+        if "repeatCell" in request_item
+    ]
+    assert any(
+        item["cell"]["userEnteredFormat"]
+        .get("numberFormat", {})
+        .get("pattern")
+        == "0.00"
+        for item in repeat_cell_requests
+    )
     assert any("setBasicFilter" in request_item for request_item in formatting_requests)
     assert result == "https://docs.google.com/spreadsheets/d/sheet-2026/edit"
+
+
+def test_google_sheets_publisher_localizes_formula_for_polish_locale() -> None:
+    service = FakeSheetsService(["03"], locale="pl_PL")
+    publisher = GoogleSheetsPublisher(service_factory=lambda: service)
+    request = SpreadsheetPublishRequest(
+        year=2026,
+        spreadsheet_id="sheet-2026",
+        worksheets=(
+            WorksheetData(
+                "03",
+                (
+                    ("header", "value"),
+                    ("formula", "=SUBTOTAL(109,H2:H2)"),
+                ),
+            ),
+        ),
+    )
+
+    publisher.publish(request)
+
+    assert service.spreadsheets_api.values_api.updated == [
+        (
+            "sheet-2026",
+            "03!A1",
+            [["header", "value"], ["formula", "=SUBTOTAL(109;H2:H2)"]],
+        ),
+    ]
 
 
 def test_google_sheets_resolver_creates_missing_yearly_spreadsheet() -> None:
@@ -194,39 +248,6 @@ def test_google_sheets_resolver_creates_missing_yearly_spreadsheet() -> None:
     )
 
 
-def test_google_sheets_publisher_localizes_formulas_for_polish_locale() -> None:
-    service = FakeSheetsService(["monthly_summary"], locale="pl_PL")
-    publisher = GoogleSheetsPublisher(service_factory=lambda: service)
-    request = SpreadsheetPublishRequest(
-        year=2026,
-        spreadsheet_id="sheet-2026",
-        worksheets=(
-            WorksheetData(
-                "monthly_summary",
-                (
-                    ("month", "total_hours"),
-                    ("2026-03", 1.5),
-                    ("VISIBLE_TOTALS", "=SUBTOTAL(109,H2:H2)"),
-                ),
-            ),
-        ),
-    )
-
-    publisher.publish(request)
-
-    assert service.spreadsheets_api.values_api.updated == [
-        (
-            "sheet-2026",
-            "monthly_summary!A1",
-            [
-                ["month", "total_hours"],
-                ["2026-03", 1.5],
-                ["VISIBLE_TOTALS", "=SUBTOTAL(109;H2:H2)"],
-            ],
-        ),
-    ]
-
-
 def test_google_sheets_resolver_reuses_existing_spreadsheet_id() -> None:
     resolver = GoogleSheetsResolver(
         spreadsheet_ids={2026: "sheet-2026"},
@@ -237,88 +258,3 @@ def test_google_sheets_resolver_reuses_existing_spreadsheet_id() -> None:
 
     assert target.spreadsheet_id == "sheet-2026"
     assert target.spreadsheet_url == "https://docs.google.com/spreadsheets/d/sheet-2026/edit"
-
-
-def test_google_sheets_publisher_skips_filter_for_metadata_and_empty_number_formats(
-) -> None:
-    service = FakeSheetsService(["metadata"], locale="en_US")
-    publisher = GoogleSheetsPublisher(service_factory=lambda: service)
-    request = SpreadsheetPublishRequest(
-        year=2026,
-        spreadsheet_id="sheet-2026",
-        worksheets=(WorksheetData("metadata", (("h1", "h2"),)),),
-    )
-
-    publisher.publish(request)
-
-    formatting_requests = service.spreadsheets_api.batch_updates[-1]["requests"]
-    assert isinstance(formatting_requests, list)
-    assert not any(
-        "setBasicFilter" in request_item for request_item in formatting_requests
-    )
-
-
-def test_google_sheets_publisher_formats_daily_summary_columns() -> None:
-    service = FakeSheetsService(["daily_summary"], locale="en_US")
-    publisher = GoogleSheetsPublisher(service_factory=lambda: service)
-    request = SpreadsheetPublishRequest(
-        year=2026,
-        spreadsheet_id="sheet-2026",
-        worksheets=(
-            WorksheetData(
-                "daily_summary",
-                (
-                    (
-                        "date",
-                        "month",
-                        "issue",
-                        "summary",
-                        "author",
-                        "account",
-                        "entries",
-                        "seconds",
-                        "hours",
-                    ),
-                    (
-                        "2026-03-11",
-                        "2026-03",
-                        "PRJ-1",
-                        "Summary",
-                        "Alice",
-                        "alice-1",
-                        2,
-                        3600,
-                        1.0,
-                    ),
-                    (
-                        "VISIBLE_TOTALS",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "=SUBTOTAL(109,G2:G2)",
-                        "=SUBTOTAL(109,H2:H2)",
-                        "=SUBTOTAL(109,I2:I2)",
-                    ),
-                ),
-            ),
-        ),
-    )
-
-    publisher.publish(request)
-
-    formatting_requests = service.spreadsheets_api.batch_updates[-1]["requests"]
-    assert isinstance(formatting_requests, list)
-    repeat_cell_requests = [
-        request_item["repeatCell"]
-        for request_item in formatting_requests
-        if "repeatCell" in request_item
-    ]
-    assert any(
-        item["cell"]["userEnteredFormat"]
-        .get("numberFormat", {})
-        .get("pattern")
-        == "0.00"
-        for item in repeat_cell_requests
-    )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from io import BytesIO
 from typing import IO, Any, Protocol, cast
 
@@ -86,6 +86,19 @@ class BigQueryWorklogWarehouse:
         client = self._client_factory()
         _delete_month_slice(client, self._table_ref, space.slug, month.label())
         _load_month_slice(client, self._table_ref, parquet_payload)
+        duplicate_ids = _duplicate_worklog_ids(
+            client,
+            self._table_ref,
+            space.slug,
+            month.label(),
+        )
+        if duplicate_ids:
+            _delete_month_slice(client, self._table_ref, space.slug, month.label())
+            formatted_ids = ", ".join(duplicate_ids)
+            raise ValueError(
+                "Duplicate worklog_id values detected for "
+                f"space={space.slug} month={month.label()}: {formatted_ids}"
+            )
 
     def ensure_views(self) -> None:
         """Creates or refreshes the reporting views built on top of worklogs."""
@@ -162,6 +175,32 @@ def _ensure_view(
     if view.view_query != query:
         view.view_query = query
         client.update_table(view, ["view_query"])
+
+
+def _duplicate_worklog_ids(
+    client: BigQueryClientProtocol,
+    table_ref: str,
+    space_slug: str,
+    report_month: str,
+) -> list[str]:
+    """Returns duplicate worklog IDs detected for one loaded month slice."""
+    query = (
+        "SELECT worklog_id "
+        f"FROM `{table_ref}` "
+        "WHERE space_slug = @space_slug AND report_month = @report_month "
+        "GROUP BY worklog_id "
+        "HAVING COUNT(*) > 1 "
+        "ORDER BY worklog_id "
+        "LIMIT 10"
+    )
+    config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("space_slug", "STRING", space_slug),
+            bigquery.ScalarQueryParameter("report_month", "STRING", report_month),
+        ]
+    )
+    result = client.query(query, job_config=config).result()
+    return [str(row["worklog_id"]) for row in cast(Iterable[Any], result)]
 
 
 def _reporting_view_queries(table_ref: str) -> dict[str, str]:

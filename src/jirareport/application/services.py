@@ -331,12 +331,13 @@ class SheetsSyncService:
             self._space.slug,
             reference_date.isoformat(),
         )
-        snapshot = _build_daily_snapshot(
-            self._source,
-            self._space,
-            reference_date,
-            self._timezone,
-            self._timezone_name,
+        snapshot = _build_snapshot_for_window(
+            source=self._source,
+            space=self._space,
+            snapshot_date=reference_date,
+            window=rolling_window(reference_date),
+            timezone=self._timezone,
+            timezone_name=self._timezone_name,
         )
         urls = self._publish_yearly_requests(snapshot)
         logger.info(
@@ -346,6 +347,34 @@ class SheetsSyncService:
         )
         logger.info(
             "Completed Google Sheets sync for space {}.",
+            self._space.slug,
+        )
+        return SpreadsheetSyncResult(tuple(urls), len(snapshot.worklogs))
+
+    def generate_range(self, window: DateRange) -> SpreadsheetSyncResult:
+        """Builds a snapshot for an explicit range and publishes monthly raw tabs."""
+        logger.info(
+            "Starting Google Sheets range sync for space {} in range {} to {}.",
+            self._space.slug,
+            window.start.isoformat(),
+            window.end.isoformat(),
+        )
+        snapshot = _build_snapshot_for_window(
+            source=self._source,
+            space=self._space,
+            snapshot_date=window.end,
+            window=window,
+            timezone=self._timezone,
+            timezone_name=self._timezone_name,
+        )
+        urls = self._publish_yearly_requests(snapshot)
+        logger.info(
+            "Published {} worklogs to {} spreadsheet(s) for explicit range.",
+            len(snapshot.worklogs),
+            len(urls),
+        )
+        logger.info(
+            "Completed Google Sheets range sync for space {}.",
             self._space.slug,
         )
         return SpreadsheetSyncResult(tuple(urls), len(snapshot.worklogs))
@@ -458,12 +487,30 @@ def _build_daily_snapshot(
     timezone_name: str,
 ) -> DailyRawSnapshot:
     """Builds the in-memory daily snapshot shared by multiple use cases."""
-    window = rolling_window(reference_date)
+    return _build_snapshot_for_window(
+        source=source,
+        space=space,
+        snapshot_date=reference_date,
+        window=rolling_window(reference_date),
+        timezone=timezone,
+        timezone_name=timezone_name,
+    )
+
+
+def _build_snapshot_for_window(
+    source: WorklogSource,
+    space: JiraSpace,
+    snapshot_date: date,
+    window: DateRange,
+    timezone: ZoneInfo,
+    timezone_name: str,
+) -> DailyRawSnapshot:
+    """Builds an in-memory snapshot for either operational or explicit windows."""
     generated_at = datetime.now(timezone)
     worklogs = _sort_worklogs(source.fetch_worklogs(window))
     return DailyRawSnapshot(
         space=space,
-        snapshot_date=reference_date,
+        snapshot_date=snapshot_date,
         window=window,
         generated_at=generated_at,
         timezone_name=timezone_name,

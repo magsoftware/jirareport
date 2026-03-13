@@ -106,9 +106,16 @@ class FakeSheetsSyncService:
     space: JiraSpace
     timezone_name: str
     last_date: date | None = None
+    last_window: DateRange | None = None
 
     def generate(self, reference_date: date) -> SyncSheetsResult:
         self.last_date = reference_date
+        return SyncSheetsResult(
+            spreadsheet_urls=("https://docs.google.com/spreadsheets/d/sheet/edit",)
+        )
+
+    def generate_range(self, window: DateRange) -> SyncSheetsResult:
+        self.last_window = window
         return SyncSheetsResult(
             spreadsheet_urls=("https://docs.google.com/spreadsheets/d/sheet/edit",)
         )
@@ -679,6 +686,8 @@ def test_run_sync_sheets_uses_current_date_when_input_missing(
         app._run_sync_sheets(
             None,
             None,
+            None,
+            None,
             settings,
             app._build_source,
             publisher,
@@ -686,6 +695,64 @@ def test_run_sync_sheets_uses_current_date_when_input_missing(
         == 0
     )
     assert fake_sync.last_date == date(2026, 3, 12)
+
+
+def test_run_sync_sheets_uses_explicit_range_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space(google_sheets_ids={2025: "sheet"}))
+    fake_sync = FakeSheetsSyncService(
+        None,
+        None,
+        None,
+        settings.spaces[0],
+        "Europe/Warsaw",
+    )
+    monkeypatch.setattr(app, "_build_source", lambda settings, space: object())
+    monkeypatch.setattr(
+        app,
+        "_build_spreadsheet_resolver",
+        lambda settings, space: object(),
+    )
+    monkeypatch.setattr(app, "SheetsSyncService", lambda *args, **kwargs: fake_sync)
+
+    publisher = cast(SpreadsheetPublisher, object())
+
+    assert (
+        app._run_sync_sheets(
+            None,
+            "2025-01-01",
+            "2025-12-31",
+            None,
+            settings,
+            app._build_source,
+            publisher,
+        )
+        == 0
+    )
+    assert fake_sync.last_window == DateRange(
+        start=date(2025, 1, 1),
+        end=date(2025, 12, 31),
+    )
+
+
+def test_run_sync_sheets_rejects_date_and_explicit_range_together(
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space(google_sheets_ids={2025: "sheet"}))
+    publisher = cast(SpreadsheetPublisher, object())
+
+    with pytest.raises(ValueError, match="Use either --date or --from/--to"):
+        app._run_sync_sheets(
+            "2026-03-11",
+            "2025-01-01",
+            "2025-12-31",
+            None,
+            settings,
+            app._build_source,
+            publisher,
+        )
 
 
 def test_run_sync_bigquery_uses_current_date_when_input_missing(

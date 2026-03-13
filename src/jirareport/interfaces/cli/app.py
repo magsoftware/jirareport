@@ -67,6 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  jirareport monthly --month 2026-03\n"
             "  jirareport sync sheets\n"
             "  jirareport sync sheets --date 2026-03-11\n"
+            "  jirareport sync sheets --from 2025-01-01 --to 2025-12-31\n"
             "  jirareport sync bigquery --date 2026-03-11"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -211,6 +212,18 @@ def _add_sync_sheets_parser(
         ),
     )
     sheets.add_argument(
+        "--from",
+        dest="from_date",
+        type=str,
+        help="Optional inclusive range start in YYYY-MM-DD format.",
+    )
+    sheets.add_argument(
+        "--to",
+        dest="to_date",
+        type=str,
+        help="Optional inclusive range end in YYYY-MM-DD format.",
+    )
+    sheets.add_argument(
         "--space",
         type=str,
         help="Optional Jira space key or slug. Defaults to all configured spaces.",
@@ -303,6 +316,8 @@ def _dispatch_sync_command(args: argparse.Namespace, settings: AppSettings) -> i
         )
     return _run_sync_sheets(
         args.date,
+        args.from_date,
+        args.to_date,
         args.space,
         settings,
         _build_source,
@@ -477,17 +492,24 @@ def _run_monthly(
 
 def _run_sync_sheets(
     input_date: str | None,
+    input_from: str | None,
+    input_to: str | None,
     space_selector: str | None,
     settings: AppSettings,
     source_builder: Callable[[AppSettings, JiraSpace], WorklogSource],
     publisher: SpreadsheetPublisher,
 ) -> int:
     """Runs the Google Sheets synchronization use case."""
-    reference_date = (
-        date.fromisoformat(input_date)
-        if input_date
-        else current_date(settings.timezone_name)
-    )
+    explicit_window = _explicit_window_optional(input_from, input_to)
+    if input_date and explicit_window is not None:
+        raise ValueError("Use either --date or --from/--to for Google Sheets sync.")
+    reference_date: date | None = None
+    if explicit_window is None:
+        reference_date = (
+            date.fromisoformat(input_date)
+            if input_date
+            else current_date(settings.timezone_name)
+        )
     for space in _selected_spaces(settings, space_selector):
         service = SheetsSyncService(
             source=source_builder(settings, space),
@@ -496,7 +518,11 @@ def _run_sync_sheets(
             space=space,
             timezone_name=settings.timezone_name,
         )
-        result = service.generate(reference_date)
+        if explicit_window is None:
+            assert reference_date is not None
+            result = service.generate(reference_date)
+        else:
+            result = service.generate_range(explicit_window)
         logger.info(
             "Published Google Sheets sync for {} to {}",
             space.slug,

@@ -337,21 +337,69 @@ def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
     assert resolver.years == [2026]
     request = publisher.requests[0]
     assert request.year == 2026
-    raw_tab = request.worksheets[0]
-    assert raw_tab.title == "raw_worklogs"
-    assert raw_tab.rows[0][0] == "snapshot_date"
-    assert raw_tab.rows[1][6] == "PRJ-1"
-    monthly_tab = request.worksheets[1]
-    assert monthly_tab.rows[0][0] == "month"
-    assert monthly_tab.rows[1][0] == "2026-02"
-    assert monthly_tab.rows[2][0] == "2026-03"
-    assert monthly_tab.rows[-1][0] == "VISIBLE_TOTALS"
-    assert monthly_tab.rows[-1][5] == "=SUBTOTAL(109,F2:F4)"
-    assert monthly_tab.rows[-1][6] == "=SUBTOTAL(109,G2:G4)"
-    assert monthly_tab.rows[-1][7] == "=SUBTOTAL(109,H2:H4)"
-    metadata_tab = request.worksheets[3]
-    assert metadata_tab.rows[1][0] == "PRJ"
-    assert metadata_tab.rows[1][3] == 2026
+    assert tuple(worksheet.title for worksheet in request.worksheets) == ("02", "03")
+    february_tab = request.worksheets[0]
+    assert february_tab.rows[0][0] == "snapshot_date"
+    assert february_tab.rows[1][5] == "2026-02"
+    assert february_tab.rows[1][6] == "PRJ-1"
+    march_tab = request.worksheets[1]
+    assert march_tab.rows[0][0] == "snapshot_date"
+    assert march_tab.rows[1][5] == "2026-03"
+    assert march_tab.rows[1][6] == "PRJ-1"
+    assert march_tab.rows[2][6] == "PRJ-2"
+
+
+def test_sync_sheets_range_builds_monthly_tabs_for_explicit_window(
+    make_worklog: Callable[..., WorklogEntry],
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    worklogs = [
+        make_worklog(
+            "1",
+            "PRJ-1",
+            "January task",
+            "Alice",
+            "2025-01-10T09:00:00+01:00",
+            3600,
+            "alice-1",
+        ),
+        make_worklog(
+            "2",
+            "PRJ-2",
+            "February task",
+            "Bob",
+            "2025-02-03T10:00:00+01:00",
+            7200,
+            "bob-1",
+        ),
+    ]
+    source = FakeWorklogSource(worklogs)
+    publisher = FakeSpreadsheetPublisher()
+    resolver = FakeSpreadsheetResolver({2025: "sheet-2025"})
+    space = make_space(
+        key="PRJ",
+        name="Project",
+        slug="project",
+        google_sheets_ids={2025: "sheet-2025"},
+    )
+    service = SheetsSyncService(
+        source=source,
+        publisher=publisher,
+        resolver=resolver,
+        space=space,
+        timezone_name="Europe/Warsaw",
+    )
+
+    result = service.generate_range(
+        DateRange(start=date(2025, 1, 1), end=date(2025, 2, 28))
+    )
+
+    assert result.spreadsheet_urls == (
+        "https://docs.google.com/spreadsheets/d/sheet-2025/edit",
+    )
+    assert resolver.years == [2025]
+    request = publisher.requests[0]
+    assert tuple(worksheet.title for worksheet in request.worksheets) == ("01", "02")
 
 
 def test_bigquery_sync_loads_active_months_from_curated_storage(
