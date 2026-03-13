@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Iterable
 from io import BytesIO
 from typing import IO, Any, Protocol, cast
 
+import pyarrow.parquet as pq
 from google.cloud import bigquery
 
 from jirareport.domain.models import JiraSpace, MonthId
@@ -83,6 +85,13 @@ class BigQueryWorklogWarehouse:
         parquet_payload: bytes,
     ) -> None:
         """Replaces one space/month slice in the worklogs table using Parquet."""
+        duplicate_ids = _duplicate_worklog_ids_in_parquet(parquet_payload)
+        if duplicate_ids:
+            formatted_ids = ", ".join(duplicate_ids)
+            raise ValueError(
+                "Duplicate worklog_id values detected in curated payload for "
+                f"space={space.slug} month={month.label()}: {formatted_ids}"
+            )
         client = self._client_factory()
         _delete_month_slice(client, self._table_ref, space.slug, month.label())
         _load_month_slice(client, self._table_ref, parquet_payload)
@@ -201,6 +210,23 @@ def _duplicate_worklog_ids(
     )
     result = client.query(query, job_config=config).result()
     return [str(row["worklog_id"]) for row in cast(Iterable[Any], result)]
+
+
+def _duplicate_worklog_ids_in_parquet(parquet_payload: bytes) -> list[str]:
+    """Returns duplicate worklog IDs detected directly in a Parquet payload."""
+    table = pq.read_table(BytesIO(parquet_payload), columns=["worklog_id"])
+    values = [
+        str(value)
+        for value in table.column("worklog_id").to_pylist()
+        if value not in {None, ""}
+    ]
+    counts = Counter(values)
+    duplicates = sorted(
+        worklog_id
+        for worklog_id, count in counts.items()
+        if count > 1
+    )
+    return duplicates[:10]
 
 
 def _reporting_view_queries(table_ref: str) -> dict[str, str]:

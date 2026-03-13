@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from io import BytesIO
 from typing import Any
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from jirareport.domain.models import JiraSpace, MonthId
@@ -61,6 +64,13 @@ class FakeBigQueryClient:
         return table
 
 
+def _parquet_payload(worklog_ids: list[str]) -> bytes:
+    table = pa.table({"worklog_id": worklog_ids})
+    buffer = BytesIO()
+    pq.write_table(table, buffer)
+    return buffer.getvalue()
+
+
 def test_bigquery_warehouse_loads_month_slice_from_parquet() -> None:
     client = FakeBigQueryClient()
     warehouse = BigQueryWorklogWarehouse(
@@ -69,11 +79,12 @@ def test_bigquery_warehouse_loads_month_slice_from_parquet() -> None:
         table="worklogs",
         client_factory=lambda: client,
     )
+    payload = _parquet_payload(["wl-1"])
 
     warehouse.load_monthly_worklogs(
         JiraSpace(key="PRJ", name="Project", slug="project"),
         MonthId(year=2026, month=3),
-        b"PAR1",
+        payload,
     )
 
     assert len(client.queries) == 2
@@ -82,11 +93,35 @@ def test_bigquery_warehouse_loads_month_slice_from_parquet() -> None:
         in client.queries[0][0]
     )
     assert "GROUP BY worklog_id" in client.queries[1][0]
-    assert client.loads[0][0] == b"PAR1"
+    assert client.loads[0][0] == payload
     assert client.loads[0][1] == "jira-report-489919.jirareport.worklogs"
 
 
-def test_bigquery_warehouse_rejects_duplicate_worklog_ids_in_loaded_slice() -> None:
+def test_bigquery_warehouse_rejects_duplicate_worklog_ids_in_curated_payload() -> None:
+    client = FakeBigQueryClient()
+    warehouse = BigQueryWorklogWarehouse(
+        project_id="jira-report-489919",
+        dataset="jirareport",
+        table="worklogs",
+        client_factory=lambda: client,
+    )
+    payload = _parquet_payload(["duplicate-1", "duplicate-1"])
+
+    with pytest.raises(
+        ValueError,
+        match="Duplicate worklog_id values detected in curated payload",
+    ):
+        warehouse.load_monthly_worklogs(
+            JiraSpace(key="PRJ", name="Project", slug="project"),
+            MonthId(year=2026, month=3),
+            payload,
+        )
+
+    assert client.queries == []
+    assert client.loads == []
+
+
+def test_bigquery_warehouse_rejects_duplicate_worklog_ids_after_load() -> None:
     client = FakeBigQueryClient()
     client.query_results = [[], [{"worklog_id": "duplicate-1"}], []]
     warehouse = BigQueryWorklogWarehouse(
@@ -95,15 +130,17 @@ def test_bigquery_warehouse_rejects_duplicate_worklog_ids_in_loaded_slice() -> N
         table="worklogs",
         client_factory=lambda: client,
     )
+    payload = _parquet_payload(["wl-1"])
 
-    with pytest.raises(ValueError, match="Duplicate worklog_id values detected"):
+    with pytest.raises(ValueError, match="Duplicate worklog_id values detected for"):
         warehouse.load_monthly_worklogs(
             JiraSpace(key="PRJ", name="Project", slug="project"),
             MonthId(year=2026, month=3),
-            b"PAR1",
+            payload,
         )
 
     assert len(client.queries) == 3
+    assert "GROUP BY worklog_id" in client.queries[1][0]
     assert (
         "DELETE FROM `jira-report-489919.jirareport.worklogs`"
         in client.queries[2][0]

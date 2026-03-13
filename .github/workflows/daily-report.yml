@@ -66,6 +66,22 @@ jobs:
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
           project_id: jira-report-489919
 
+      - name: Validate workflow inputs
+        run: |
+          report_date="${{ github.event.inputs.report_date }}"
+          from_date="${{ github.event.inputs.from_date }}"
+          to_date="${{ github.event.inputs.to_date }}"
+
+          if [ -n "$report_date" ] && { [ -n "$from_date" ] || [ -n "$to_date" ]; }; then
+            echo "report_date cannot be combined with from_date/to_date" >&2
+            exit 1
+          fi
+
+          if { [ -n "$from_date" ] && [ -z "$to_date" ]; } || { [ -z "$from_date" ] && [ -n "$to_date" ]; }; then
+            echo "from_date and to_date must be provided together" >&2
+            exit 1
+          fi
+
       - name: Sync dependencies
         run: uv sync --group dev
 
