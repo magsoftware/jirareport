@@ -163,7 +163,7 @@ def test_main_dispatches_daily_command(
         None,
         None,
         None,
-        settings.spaces[0],
+        _first_space(settings),
         "Europe/Warsaw",
     )
     monkeypatch.setattr(app, "load_settings", lambda: settings)
@@ -193,7 +193,7 @@ def test_main_dispatches_monthly_command(
         None,
         None,
         None,
-        settings.spaces[0],
+        _first_space(settings),
         "Europe/Warsaw",
     )
     monkeypatch.setattr(app, "load_settings", lambda: settings)
@@ -228,7 +228,7 @@ def test_main_dispatches_backfill_command(
         None,
         None,
         None,
-        settings.spaces[0],
+        _first_space(settings),
         "Europe/Warsaw",
     )
     monkeypatch.setattr(app, "load_settings", lambda: settings)
@@ -262,7 +262,7 @@ def test_main_dispatches_sync_sheets_command(
         None,
         None,
         None,
-        settings.spaces[0],
+        _first_space(settings),
         "Europe/Warsaw",
     )
     monkeypatch.setattr(app, "load_settings", lambda: settings)
@@ -288,7 +288,7 @@ def test_main_dispatches_sync_bigquery_command(
     make_space: Callable[..., JiraSpace],
 ) -> None:
     settings = _settings(make_space())
-    fake_sync = FakeBigQuerySyncService(object(), object(), settings.spaces[0])
+    fake_sync = FakeBigQuerySyncService(object(), object(), _first_space(settings))
     monkeypatch.setattr(app, "load_settings", lambda: settings)
     monkeypatch.setattr(app, "configure_logging", lambda debug: None)
     monkeypatch.setattr(app, "flush_logging", lambda: None)
@@ -322,8 +322,8 @@ def test_selected_spaces_supports_key_and_slug(
         make_space(key="LA004832", name="Click Price", slug="click-price"),
     )
 
-    assert app._selected_spaces(settings, "LA004832")[0].slug == "click-price"
-    assert app._selected_spaces(settings, "click-price")[0].key == "LA004832"
+    assert app._selected_spaces(settings, "LA004832")[0].space.slug == "click-price"
+    assert app._selected_spaces(settings, "click-price")[0].space.key == "LA004832"
 
 
 def test_selected_spaces_returns_all_spaces_when_selector_missing(
@@ -335,9 +335,13 @@ def test_selected_spaces_returns_all_spaces_when_selector_missing(
             email="user@example.com",
             api_token="secret",
         ),
-        spaces=(
-            make_space(key="LA004832", name="Click Price", slug="click-price"),
-            make_space(key="LA009644", name="Data Fixer", slug="data-fixer"),
+        configured_spaces=(
+            ConfiguredSpace(
+                space=make_space(key="LA004832", name="Click Price", slug="click-price"),
+            ),
+            ConfiguredSpace(
+                space=make_space(key="LA009644", name="Data Fixer", slug="data-fixer"),
+            ),
         ),
         storage=StorageSettings(
             backend="local",
@@ -355,7 +359,7 @@ def test_selected_spaces_returns_all_spaces_when_selector_missing(
         timezone_name="Europe/Warsaw",
     )
 
-    assert tuple(space.slug for space in app._selected_spaces(settings, None)) == (
+    assert tuple(configured_space.space.slug for configured_space in app._selected_spaces(settings, None)) == (
         "click-price",
         "data-fixer",
     )
@@ -379,7 +383,7 @@ def test_build_spreadsheet_helpers_reject_when_disabled(
             email="user@example.com",
             api_token="secret",
         ),
-        spaces=(make_space(),),
+        configured_spaces=(ConfiguredSpace(space=make_space()),),
         storage=StorageSettings(
             backend="local",
             local_output_dir=Path("reports"),
@@ -399,7 +403,7 @@ def test_build_spreadsheet_helpers_reject_when_disabled(
     with pytest.raises(ValueError, match="Google Sheets publishing is disabled"):
         app._build_spreadsheet_publisher(settings)
     with pytest.raises(ValueError, match="Google Sheets publishing is disabled"):
-        app._build_spreadsheet_resolver(settings, settings.spaces[0])
+        app._build_spreadsheet_resolver(settings, _first_configured_space(settings))
 
 
 def test_build_worklog_warehouse_rejects_when_disabled(
@@ -411,7 +415,7 @@ def test_build_worklog_warehouse_rejects_when_disabled(
             email="user@example.com",
             api_token="secret",
         ),
-        spaces=(make_space(),),
+        configured_spaces=(ConfiguredSpace(space=make_space()),),
         storage=StorageSettings(
             backend="local",
             local_output_dir=Path("reports"),
@@ -494,7 +498,7 @@ def test_build_spreadsheet_helpers_return_configured_adapters(
     monkeypatch.setattr(app, "GoogleSheetsResolver", FakeResolver)
 
     publisher = app._build_spreadsheet_publisher(settings)
-    resolver = app._build_spreadsheet_resolver(settings, settings.spaces[0])
+    resolver = app._build_spreadsheet_resolver(settings, _first_configured_space(settings))
 
     assert isinstance(publisher, FakePublisher)
     assert isinstance(resolver, FakeResolver)
@@ -511,7 +515,7 @@ def test_build_worklog_warehouse_rejects_missing_project_or_dataset(
     settings = _settings(make_space())
     settings = AppSettings(
         jira=settings.jira,
-        spaces=settings.spaces,
+        configured_spaces=settings.configured_spaces,
         storage=settings.storage,
         sheets=settings.sheets,
         bigquery=BigQuerySettings(
@@ -531,7 +535,7 @@ def test_build_worklog_warehouse_rejects_missing_project_or_dataset(
 
     settings = AppSettings(
         jira=settings.jira,
-        spaces=settings.spaces,
+        configured_spaces=settings.configured_spaces,
         storage=settings.storage,
         sheets=settings.sheets,
         bigquery=BigQuerySettings(
@@ -557,7 +561,7 @@ def test_build_worklog_warehouse_returns_bigquery_adapter(
     settings = _settings(make_space())
     settings = AppSettings(
         jira=settings.jira,
-        spaces=settings.spaces,
+        configured_spaces=settings.configured_spaces,
         storage=settings.storage,
         sheets=settings.sheets,
         bigquery=BigQuerySettings(
@@ -591,7 +595,7 @@ def test_build_worklog_warehouse_returns_bigquery_adapter(
     assert captured == {
         "project_id": "jira-report-489919",
         "dataset": "jirareport",
-        "spaces": settings.spaces,
+        "spaces": _spaces(settings),
         "table": "monthly_worklogs",
     }
 
@@ -605,14 +609,14 @@ def test_run_daily_and_monthly_use_current_date_when_input_missing(
         None,
         None,
         None,
-        settings.spaces[0],
+        _first_space(settings),
         "Europe/Warsaw",
     )
     fake_monthly = FakeMonthlyService(
         None,
         None,
         None,
-        settings.spaces[0],
+        _first_space(settings),
         "Europe/Warsaw",
     )
     monkeypatch.setattr(app, "current_date", lambda timezone: date(2026, 3, 12))
@@ -684,7 +688,7 @@ def test_run_sync_sheets_uses_current_date_when_input_missing(
         None,
         None,
         None,
-        settings.spaces[0],
+        _first_space(settings),
         "Europe/Warsaw",
     )
     monkeypatch.setattr(app, "current_date", lambda timezone: date(2026, 3, 12))
@@ -722,7 +726,7 @@ def test_run_sync_sheets_uses_explicit_range_when_requested(
         None,
         None,
         None,
-        settings.spaces[0],
+        _first_space(settings),
         "Europe/Warsaw",
     )
     monkeypatch.setattr(app, "_build_source", lambda settings, space: object())
@@ -776,7 +780,7 @@ def test_run_sync_bigquery_uses_current_date_when_input_missing(
     make_space: Callable[..., JiraSpace],
 ) -> None:
     settings = _settings(make_space())
-    fake_sync = FakeBigQuerySyncService(object(), object(), settings.spaces[0])
+    fake_sync = FakeBigQuerySyncService(object(), object(), _first_space(settings))
     monkeypatch.setattr(app, "current_date", lambda timezone: date(2026, 3, 12))
     monkeypatch.setattr(app, "BigQuerySyncService", lambda *args, **kwargs: fake_sync)
 
@@ -803,7 +807,7 @@ def test_run_sync_bigquery_uses_explicit_range_when_requested(
     make_space: Callable[..., JiraSpace],
 ) -> None:
     settings = _settings(make_space())
-    fake_sync = FakeBigQuerySyncService(object(), object(), settings.spaces[0])
+    fake_sync = FakeBigQuerySyncService(object(), object(), _first_space(settings))
     monkeypatch.setattr(app, "BigQuerySyncService", lambda *args, **kwargs: fake_sync)
 
     dataset_storage = cast(CuratedDatasetStorage, object())
@@ -858,7 +862,6 @@ def _settings(
             email="user@example.com",
             api_token="secret",
         ),
-        spaces=(space,),
         storage=StorageSettings(
             backend="local",
             local_output_dir=Path("reports"),
@@ -884,3 +887,15 @@ def _settings(
             ),
         ),
     )
+
+
+def _first_configured_space(settings: AppSettings) -> ConfiguredSpace:
+    return settings.configured_spaces[0]
+
+
+def _first_space(settings: AppSettings) -> JiraSpace:
+    return _first_configured_space(settings).space
+
+
+def _spaces(settings: AppSettings) -> tuple[JiraSpace, ...]:
+    return tuple(configured_space.space for configured_space in settings.configured_spaces)

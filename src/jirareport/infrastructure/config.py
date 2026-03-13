@@ -69,19 +69,11 @@ class AppSettings:
     """Represents the full application configuration."""
 
     jira: JiraSettings
-    spaces: tuple[JiraSpace, ...]
     storage: StorageSettings
     sheets: SheetsSettings
     bigquery: BigQuerySettings
     timezone_name: str
-    configured_spaces: tuple[ConfiguredSpace, ...] = ()
-
-    def configured_space(self, space: JiraSpace) -> ConfiguredSpace:
-        """Returns adapter configuration for one reporting space."""
-        for configured_space in self.configured_spaces:
-            if configured_space.space == space:
-                return configured_space
-        return ConfiguredSpace(space=space)
+    configured_spaces: tuple[ConfiguredSpace, ...]
 
 
 def load_settings() -> AppSettings:
@@ -93,7 +85,6 @@ def load_settings() -> AppSettings:
         api_token=_required_env("JIRA_API_TOKEN"),
     )
     configured_spaces = _load_configured_spaces()
-    spaces = tuple(configured_space.space for configured_space in configured_spaces)
     backend = _storage_backend_from_env()
     storage = StorageSettings(
         backend=backend,
@@ -114,7 +105,6 @@ def load_settings() -> AppSettings:
     timezone_name = os.getenv("REPORT_TIMEZONE", "Europe/Warsaw")
     return AppSettings(
         jira=jira,
-        spaces=spaces,
         storage=storage,
         sheets=sheets,
         bigquery=bigquery,

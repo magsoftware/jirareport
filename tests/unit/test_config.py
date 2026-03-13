@@ -61,8 +61,8 @@ def test_load_settings_defaults_to_gcs_when_bucket_present(
     assert settings.sheets.enabled is False
     assert settings.sheets.title_prefix == "Jira Worklog Analytics"
     assert settings.bigquery.enabled is False
-    assert settings.spaces[0].key == "LA004832"
-    assert settings.spaces[0].slug == "click-price"
+    assert settings.configured_spaces[0].space.key == "LA004832"
+    assert settings.configured_spaces[0].space.slug == "click-price"
 
 
 def test_load_settings_supports_local_storage(
@@ -108,7 +108,7 @@ def test_load_settings_enables_google_sheets_when_space_has_ids(
     settings = load_settings()
 
     assert settings.sheets.enabled is True
-    assert settings.configured_space(settings.spaces[0]).google_sheets_id_map() == {2026: "sheet-2026"}
+    assert settings.configured_spaces[0].google_sheets_id_map() == {2026: "sheet-2026"}
 
 
 def test_load_settings_enables_bigquery_when_project_and_dataset_are_configured(

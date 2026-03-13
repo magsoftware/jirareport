@@ -89,84 +89,7 @@ class BigQuerySyncResult:
     worklog_count: int
 
 
-class _BaseTimedSpaceService:
-    """Provides shared space and timezone context for application services."""
-
-    def __init__(self, space: JiraSpace, timezone_name: str) -> None:
-        """Initializes common service context."""
-        self._space = space
-        self._timezone = ZoneInfo(timezone_name)
-        self._timezone_name = timezone_name
-
-
-class _BaseSourceService(_BaseTimedSpaceService):
-    """Provides shared worklog source access for application services."""
-
-    def __init__(
-        self,
-        source: WorklogSource,
-        space: JiraSpace,
-        timezone_name: str,
-    ) -> None:
-        """Initializes source-backed service context."""
-        super().__init__(space=space, timezone_name=timezone_name)
-        self._source = source
-
-    def _fetch_sorted_worklogs(self, window: DateRange) -> list[WorklogEntry]:
-        """Fetches worklogs for a window and sorts them deterministically."""
-        return _fetch_sorted_worklogs(self._source, window)
-
-    def _build_snapshot(
-        self,
-        snapshot_date: date,
-        window: DateRange,
-    ) -> DailyRawSnapshot:
-        """Builds an in-memory snapshot for the requested window."""
-        return _build_snapshot_for_window(
-            source=self._source,
-            space=self._space,
-            snapshot_date=snapshot_date,
-            window=window,
-            timezone=self._timezone,
-            timezone_name=self._timezone_name,
-        )
-
-
-class _BaseMonthlyReportService(_BaseSourceService):
-    """Provides shared monthly report persistence for application services."""
-
-    def __init__(
-        self,
-        source: WorklogSource,
-        report_storage: JsonReportStorage,
-        dataset_storage: CuratedDatasetStorage,
-        space: JiraSpace,
-        timezone_name: str,
-    ) -> None:
-        """Initializes report persistence dependencies."""
-        super().__init__(source=source, space=space, timezone_name=timezone_name)
-        self._report_storage = report_storage
-        self._dataset_storage = dataset_storage
-
-    def _write_monthly_reports(
-        self,
-        months: tuple[MonthId, ...],
-        worklogs: list[WorklogEntry],
-        generated_at: datetime,
-    ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[MonthlyWorklogReport, ...]]:
-        """Writes derived monthly reports and curated datasets."""
-        return _write_monthly_reports(
-            report_storage=self._report_storage,
-            dataset_storage=self._dataset_storage,
-            space=self._space,
-            months=months,
-            worklogs=worklogs,
-            generated_at=generated_at,
-            timezone_name=self._timezone_name,
-        )
-
-
-class DailySnapshotService(_BaseMonthlyReportService):
+class DailySnapshotService:
     """Implements the main daily reporting use case.
 
     This service is the core of the tool. It fetches worklogs for the rolling
@@ -183,13 +106,12 @@ class DailySnapshotService(_BaseMonthlyReportService):
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting dependencies."""
-        super().__init__(
-            source=source,
-            report_storage=report_storage,
-            dataset_storage=dataset_storage,
-            space=space,
-            timezone_name=timezone_name,
-        )
+        self._source = source
+        self._report_storage = report_storage
+        self._dataset_storage = dataset_storage
+        self._space = space
+        self._timezone = ZoneInfo(timezone_name)
+        self._timezone_name = timezone_name
 
     def generate(self, reference_date: date) -> DailySnapshotResult:
         """Generates the raw daily snapshot and derived monthly reports.
@@ -203,7 +125,7 @@ class DailySnapshotService(_BaseMonthlyReportService):
         """
         window = rolling_window(reference_date)
         generated_at = datetime.now(self._timezone)
-        worklogs = self._fetch_sorted_worklogs(window)
+        worklogs = _fetch_sorted_worklogs(self._source, window)
         snapshot = DailyRawSnapshot(
             space=self._space,
             snapshot_date=reference_date,
@@ -216,10 +138,14 @@ class DailySnapshotService(_BaseMonthlyReportService):
             _daily_snapshot_path(self._space, reference_date),
             serialize_daily_snapshot(snapshot),
         )
-        monthly_paths, curated_paths, _ = self._write_monthly_reports(
+        monthly_paths, curated_paths, _ = _write_monthly_reports(
+            report_storage=self._report_storage,
+            dataset_storage=self._dataset_storage,
+            space=self._space,
             months=months_in_range(window),
             worklogs=worklogs,
             generated_at=generated_at,
+            timezone_name=self._timezone_name,
         )
         logger.info(
             "Generated snapshot for space {} with {} worklogs across {} month(s).",
@@ -235,7 +161,7 @@ class DailySnapshotService(_BaseMonthlyReportService):
         )
 
 
-class MonthlyReportService(_BaseMonthlyReportService):
+class MonthlyReportService:
     """Builds a single derived monthly report on demand."""
 
     def __init__(
@@ -247,23 +173,26 @@ class MonthlyReportService(_BaseMonthlyReportService):
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting dependencies."""
-        super().__init__(
-            source=source,
-            report_storage=report_storage,
-            dataset_storage=dataset_storage,
-            space=space,
-            timezone_name=timezone_name,
-        )
+        self._source = source
+        self._report_storage = report_storage
+        self._dataset_storage = dataset_storage
+        self._space = space
+        self._timezone = ZoneInfo(timezone_name)
+        self._timezone_name = timezone_name
 
     def generate(self, month: MonthId) -> MonthlyReportResult:
         """Generates one monthly report for the requested month."""
         window = month_range(month)
         generated_at = datetime.now(self._timezone)
-        worklogs = self._fetch_sorted_worklogs(window)
-        report_paths, curated_paths, reports = self._write_monthly_reports(
+        worklogs = _fetch_sorted_worklogs(self._source, window)
+        report_paths, curated_paths, reports = _write_monthly_reports(
+            report_storage=self._report_storage,
+            dataset_storage=self._dataset_storage,
+            space=self._space,
             months=(month,),
             worklogs=worklogs,
             generated_at=generated_at,
+            timezone_name=self._timezone_name,
         )
         report = reports[0]
         ticket_count = len(report.tickets)
@@ -275,7 +204,7 @@ class MonthlyReportService(_BaseMonthlyReportService):
         )
 
 
-class BackfillService(_BaseMonthlyReportService):
+class BackfillService:
     """Builds monthly reports for an explicit historical date range."""
 
     def __init__(
@@ -287,28 +216,31 @@ class BackfillService(_BaseMonthlyReportService):
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting dependencies."""
-        super().__init__(
-            source=source,
-            report_storage=report_storage,
-            dataset_storage=dataset_storage,
-            space=space,
-            timezone_name=timezone_name,
-        )
+        self._source = source
+        self._report_storage = report_storage
+        self._dataset_storage = dataset_storage
+        self._space = space
+        self._timezone = ZoneInfo(timezone_name)
+        self._timezone_name = timezone_name
 
     def generate(self, window: DateRange) -> BackfillResult:
         """Generates monthly reports for every month touched by the range."""
         generated_at = datetime.now(self._timezone)
-        worklogs = self._fetch_sorted_worklogs(window)
+        worklogs = _fetch_sorted_worklogs(self._source, window)
         logger.info(
             "Starting historical backfill for space {} in range {} to {}.",
             self._space.slug,
             window.start.isoformat(),
             window.end.isoformat(),
         )
-        monthly_paths, curated_paths, _ = self._write_monthly_reports(
+        monthly_paths, curated_paths, _ = _write_monthly_reports(
+            report_storage=self._report_storage,
+            dataset_storage=self._dataset_storage,
+            space=self._space,
             months=months_in_range(window),
             worklogs=worklogs,
             generated_at=generated_at,
+            timezone_name=self._timezone_name,
         )
         logger.info(
             ("Completed historical backfill for space {} with {} worklogs across {} month(s)."),
@@ -324,7 +256,7 @@ class BackfillService(_BaseMonthlyReportService):
         )
 
 
-class SheetsSyncService(_BaseSourceService):
+class SheetsSyncService:
     """Publishes the current daily reporting snapshot to yearly spreadsheets."""
 
     def __init__(
@@ -336,9 +268,12 @@ class SheetsSyncService(_BaseSourceService):
         timezone_name: str,
     ) -> None:
         """Initializes the service with its reporting and publishing ports."""
-        super().__init__(source=source, space=space, timezone_name=timezone_name)
+        self._source = source
         self._publisher = publisher
         self._resolver = resolver
+        self._space = space
+        self._timezone = ZoneInfo(timezone_name)
+        self._timezone_name = timezone_name
 
     def generate(self, reference_date: date) -> SpreadsheetSyncResult:
         """Builds the current snapshot and publishes it to yearly spreadsheets."""
@@ -364,7 +299,14 @@ class SheetsSyncService(_BaseSourceService):
     ) -> SpreadsheetSyncResult:
         """Builds and publishes a snapshot for either rolling or explicit windows."""
         self._log_sync_start(snapshot_date, window, explicit_range)
-        snapshot = self._build_snapshot(snapshot_date=snapshot_date, window=window)
+        snapshot = _build_snapshot_for_window(
+            source=self._source,
+            space=self._space,
+            snapshot_date=snapshot_date,
+            window=window,
+            timezone=self._timezone,
+            timezone_name=self._timezone_name,
+        )
         urls = self._publish_yearly_requests(snapshot)
         self._log_sync_completion(
             worklog_count=len(snapshot.worklogs),

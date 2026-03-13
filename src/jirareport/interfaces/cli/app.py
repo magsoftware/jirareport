@@ -24,7 +24,7 @@ from jirareport.domain.ports import (
     WorklogWarehouse,
 )
 from jirareport.domain.time_range import current_date, explicit_range
-from jirareport.infrastructure.config import AppSettings, load_settings
+from jirareport.infrastructure.config import AppSettings, ConfiguredSpace, load_settings
 from jirareport.infrastructure.google.bigquery_client import BigQueryWorklogWarehouse
 from jirareport.infrastructure.google.sheets_client import (
     GoogleSheetsPublisher,
@@ -362,19 +362,19 @@ def _build_worklog_warehouse(settings: AppSettings) -> WorklogWarehouse:
     return BigQueryWorklogWarehouse(
         project_id=settings.bigquery.project_id,
         dataset=settings.bigquery.dataset,
-        spaces=settings.spaces,
+        spaces=tuple(configured_space.space for configured_space in settings.configured_spaces),
         table=settings.bigquery.table,
     )
 
 
 def _build_spreadsheet_resolver(
     settings: AppSettings,
-    space: JiraSpace,
+    configured_space: ConfiguredSpace,
 ) -> SpreadsheetResolver:
     """Builds the configured yearly spreadsheet resolver."""
     if not settings.sheets.enabled:
         raise ValueError("Google Sheets publishing is disabled.")
-    configured_space = settings.configured_space(space)
+    space = configured_space.space
     return GoogleSheetsResolver(
         spreadsheet_ids=configured_space.google_sheets_id_map(),
         title_prefix=f"{settings.sheets.title_prefix} - {space.name}",
@@ -410,11 +410,11 @@ def _resolve_reference_date_or_window(
 def _run_for_selected_spaces(
     settings: AppSettings,
     selector: str | None,
-    runner: Callable[[JiraSpace], None],
+    runner: Callable[[ConfiguredSpace], None],
 ) -> None:
     """Executes one callback for every selected reporting space."""
-    for space in _selected_spaces(settings, selector):
-        runner(space)
+    for configured_space in _selected_spaces(settings, selector):
+        runner(configured_space)
 
 
 def _run_daily(
@@ -428,7 +428,8 @@ def _run_daily(
     """Runs the main daily use case."""
     reference_date = _resolve_reference_date(input_date, settings.timezone_name)
 
-    def run_for_space(space: JiraSpace) -> None:
+    def run_for_space(configured_space: ConfiguredSpace) -> None:
+        space = configured_space.space
         service = DailySnapshotService(
             source=source_builder(settings, space),
             report_storage=report_storage,
@@ -462,7 +463,8 @@ def _run_backfill(
     """Runs the historical backfill use case for an explicit range."""
     window = _explicit_window(input_from, input_to)
 
-    def run_for_space(space: JiraSpace) -> None:
+    def run_for_space(configured_space: ConfiguredSpace) -> None:
+        space = configured_space.space
         service = BackfillService(
             source=source_builder(settings, space),
             report_storage=report_storage,
@@ -494,7 +496,8 @@ def _run_monthly(
     """Runs the ad hoc monthly report generation use case."""
     month = MonthId.parse(input_month) if input_month else MonthId.from_date(current_date(settings.timezone_name))
 
-    def run_for_space(space: JiraSpace) -> None:
+    def run_for_space(configured_space: ConfiguredSpace) -> None:
+        space = configured_space.space
         service = MonthlyReportService(
             source=source_builder(settings, space),
             report_storage=report_storage,
@@ -532,11 +535,12 @@ def _run_sync_sheets(
         command_label="Google Sheets sync",
     )
 
-    def run_for_space(space: JiraSpace) -> None:
+    def run_for_space(configured_space: ConfiguredSpace) -> None:
+        space = configured_space.space
         service = SheetsSyncService(
             source=source_builder(settings, space),
             publisher=publisher,
-            resolver=_build_spreadsheet_resolver(settings, space),
+            resolver=_build_spreadsheet_resolver(settings, configured_space),
             space=space,
             timezone_name=settings.timezone_name,
         )
@@ -575,7 +579,8 @@ def _run_sync_bigquery(
         command_label="BigQuery sync",
     )
 
-    def run_for_space(space: JiraSpace) -> None:
+    def run_for_space(configured_space: ConfiguredSpace) -> None:
+        space = configured_space.space
         service = BigQuerySyncService(
             dataset_storage=dataset_storage,
             warehouse=warehouse,
@@ -621,11 +626,12 @@ def _explicit_window_optional(
 def _selected_spaces(
     settings: AppSettings,
     selector: str | None,
-) -> tuple[JiraSpace, ...]:
+) -> tuple[ConfiguredSpace, ...]:
     """Returns either all configured spaces or one selected by key or slug."""
     if selector in {None, ""}:
-        return settings.spaces
-    for space in settings.spaces:
+        return settings.configured_spaces
+    for configured_space in settings.configured_spaces:
+        space = configured_space.space
         if selector in {space.key, space.slug}:
-            return (space,)
+            return (configured_space,)
     raise ValueError(f"Unknown Jira space selector: {selector}")
