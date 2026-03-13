@@ -51,7 +51,6 @@ def test_serialize_daily_snapshot_omits_fractional_seconds() -> None:
         "key": "PRJ",
         "name": "Project",
         "slug": "project",
-        "board_id": None,
     }
     assert worklog["started_at"] == "2026-03-11T09:13:12+01:00"
     assert worklog["ended_at"] == "2026-03-11T10:13:12+01:00"

@@ -51,6 +51,19 @@ class BigQuerySettings:
 
 
 @dataclass(frozen=True)
+class ConfiguredSpace:
+    """Represents one configured reporting space and its adapter settings."""
+
+    space: JiraSpace
+    board_id: int | None = None
+    google_sheets_ids: tuple[tuple[int, str], ...] = ()
+
+    def google_sheets_id_map(self) -> dict[int, str]:
+        """Returns configured spreadsheet IDs keyed by reporting year."""
+        return dict(self.google_sheets_ids)
+
+
+@dataclass(frozen=True)
 class AppSettings:
     """Represents the full application configuration."""
 
@@ -60,6 +73,14 @@ class AppSettings:
     sheets: SheetsSettings
     bigquery: BigQuerySettings
     timezone_name: str
+    configured_spaces: tuple[ConfiguredSpace, ...] = ()
+
+    def configured_space(self, space: JiraSpace) -> ConfiguredSpace:
+        """Returns adapter configuration for one reporting space."""
+        for configured_space in self.configured_spaces:
+            if configured_space.space == space:
+                return configured_space
+        return ConfiguredSpace(space=space)
 
 
 def load_settings() -> AppSettings:
@@ -70,7 +91,8 @@ def load_settings() -> AppSettings:
         email=_required_env("JIRA_EMAIL"),
         api_token=_required_env("JIRA_API_TOKEN"),
     )
-    spaces = _load_spaces()
+    configured_spaces = _load_configured_spaces()
+    spaces = tuple(configured_space.space for configured_space in configured_spaces)
     backend = _storage_backend_from_env()
     storage = StorageSettings(
         backend=backend,
@@ -79,7 +101,7 @@ def load_settings() -> AppSettings:
         bucket_prefix=os.getenv("GCS_BUCKET_PREFIX", "jirareport"),
     )
     sheets = SheetsSettings(
-        enabled=_sheets_enabled_from_env(spaces),
+        enabled=_sheets_enabled_from_env(configured_spaces),
         title_prefix=os.getenv("GOOGLE_SHEETS_TITLE_PREFIX", "Jira Worklog Analytics"),
     )
     bigquery = BigQuerySettings(
@@ -96,6 +118,7 @@ def load_settings() -> AppSettings:
         sheets=sheets,
         bigquery=bigquery,
         timezone_name=timezone_name,
+        configured_spaces=configured_spaces,
     )
 
 
@@ -124,14 +147,14 @@ def _bucket_name_for_backend(backend: StorageBackend) -> str | None:
     return _required_env("GCS_BUCKET_NAME")
 
 
-def _load_spaces() -> tuple[JiraSpace, ...]:
-    """Loads reporting spaces from the YAML configuration file."""
+def _load_configured_spaces() -> tuple[ConfiguredSpace, ...]:
+    """Loads configured reporting spaces from the YAML configuration file."""
     config_path = Path(os.getenv("JIRA_SPACES_CONFIG_PATH", "config/spaces.yaml"))
     payload = _load_yaml_mapping(config_path)
     raw_spaces = payload.get("spaces")
     if not isinstance(raw_spaces, list) or not raw_spaces:
         raise ValueError("Spaces configuration must define a non-empty 'spaces' list.")
-    spaces = tuple(_parse_space(item) for item in raw_spaces)
+    spaces = tuple(_parse_configured_space(item) for item in raw_spaces)
     _validate_unique_space_values(spaces)
     return spaces
 
@@ -147,7 +170,7 @@ def _load_yaml_mapping(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], payload)
 
 
-def _parse_space(raw: Any) -> JiraSpace:
+def _parse_configured_space(raw: Any) -> ConfiguredSpace:
     """Parses one configured reporting space from YAML data."""
     if not isinstance(raw, dict):
         raise ValueError("Each space configuration entry must be a mapping.")
@@ -156,10 +179,12 @@ def _parse_space(raw: Any) -> JiraSpace:
     slug = _required_mapping_string(raw, "slug")
     board_id = _optional_mapping_int(raw, "board_id")
     google_sheets_ids = _parse_sheet_ids(raw.get("google_sheets_ids"))
-    return JiraSpace(
-        key=key,
-        name=name,
-        slug=slug,
+    return ConfiguredSpace(
+        space=JiraSpace(
+            key=key,
+            name=name,
+            slug=slug,
+        ),
         board_id=board_id,
         google_sheets_ids=google_sheets_ids,
     )
@@ -184,44 +209,50 @@ def _optional_mapping_int(raw: dict[str, Any], key: str) -> int | None:
     return value
 
 
-def _parse_sheet_ids(raw: Any) -> dict[int, str] | None:
+def _parse_sheet_ids(raw: Any) -> tuple[tuple[int, str], ...]:
     """Parses per-year spreadsheet IDs from a config mapping."""
     if raw is None or raw == "":
-        return None
+        return ()
     if not isinstance(raw, dict):
         message = "'google_sheets_ids' must be a mapping of year to spreadsheet ID."
         raise ValueError(message)
-    result: dict[int, str] = {}
+    result: list[tuple[int, str]] = []
     for year, spreadsheet_id in raw.items():
         if not isinstance(year, int):
             raise ValueError("Google Sheets year keys must be integers.")
         if not isinstance(spreadsheet_id, str) or not spreadsheet_id.strip():
             raise ValueError("Google Sheets spreadsheet IDs must be non-empty strings.")
-        result[year] = spreadsheet_id.strip()
-    return result
+        result.append((year, spreadsheet_id.strip()))
+    return tuple(sorted(result))
 
 
-def _validate_unique_space_values(spaces: tuple[JiraSpace, ...]) -> None:
+def _validate_unique_space_values(spaces: tuple[ConfiguredSpace, ...]) -> None:
     """Validates that configured spaces do not reuse key or slug values."""
     _validate_unique_attribute(spaces, "key")
     _validate_unique_attribute(spaces, "slug")
 
 
-def _validate_unique_attribute(spaces: tuple[JiraSpace, ...], attribute: str) -> None:
+def _validate_unique_attribute(
+    spaces: tuple[ConfiguredSpace, ...],
+    attribute: str,
+) -> None:
     """Ensures one string attribute remains unique across configured spaces."""
     seen: set[str] = set()
-    for space in spaces:
-        value = getattr(space, attribute)
+    for configured_space in spaces:
+        value = getattr(configured_space.space, attribute)
         if value in seen:
             raise ValueError(f"Duplicate Jira space {attribute}: {value}")
         seen.add(value)
 
 
-def _sheets_enabled_from_env(spaces: tuple[JiraSpace, ...]) -> bool:
+def _sheets_enabled_from_env(configured_spaces: tuple[ConfiguredSpace, ...]) -> bool:
     """Determines whether Google Sheets publishing is enabled."""
     raw_value = os.getenv("GOOGLE_SHEETS_ENABLED")
     if raw_value in {None, ""}:
-        return any(space.safe_google_sheets_ids for space in spaces)
+        return any(
+            configured_space.google_sheets_ids
+            for configured_space in configured_spaces
+        )
     assert raw_value is not None
     normalized = raw_value.lower().strip()
     if normalized in {"1", "true", "yes", "on"}:

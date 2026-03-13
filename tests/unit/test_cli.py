@@ -18,6 +18,7 @@ from jirareport.domain.ports import (
 from jirareport.infrastructure.config import (
     AppSettings,
     BigQuerySettings,
+    ConfiguredSpace,
     JiraSettings,
     SheetsSettings,
     StorageSettings,
@@ -258,7 +259,7 @@ def test_main_dispatches_sync_sheets_command(
     monkeypatch: pytest.MonkeyPatch,
     make_space: Callable[..., JiraSpace],
 ) -> None:
-    settings = _settings(make_space(google_sheets_ids={2026: "sheet"}))
+    settings = _settings(make_space(), google_sheets_ids={2026: "sheet"})
     fake_sync = FakeSheetsSyncService(
         None,
         None,
@@ -482,7 +483,7 @@ def test_build_spreadsheet_helpers_return_configured_adapters(
     monkeypatch: pytest.MonkeyPatch,
     make_space: Callable[..., JiraSpace],
 ) -> None:
-    settings = _settings(make_space(google_sheets_ids={2026: "sheet-2026"}))
+    settings = _settings(make_space(), google_sheets_ids={2026: "sheet-2026"})
     created: dict[str, object] = {}
 
     class FakePublisher:
@@ -682,7 +683,7 @@ def test_run_sync_sheets_uses_current_date_when_input_missing(
     monkeypatch: pytest.MonkeyPatch,
     make_space: Callable[..., JiraSpace],
 ) -> None:
-    settings = _settings(make_space(google_sheets_ids={2026: "sheet"}))
+    settings = _settings(make_space(), google_sheets_ids={2026: "sheet"})
     fake_sync = FakeSheetsSyncService(
         None,
         None,
@@ -720,7 +721,7 @@ def test_run_sync_sheets_uses_explicit_range_when_requested(
     monkeypatch: pytest.MonkeyPatch,
     make_space: Callable[..., JiraSpace],
 ) -> None:
-    settings = _settings(make_space(google_sheets_ids={2025: "sheet"}))
+    settings = _settings(make_space(), google_sheets_ids={2025: "sheet"})
     fake_sync = FakeSheetsSyncService(
         None,
         None,
@@ -759,7 +760,7 @@ def test_run_sync_sheets_uses_explicit_range_when_requested(
 def test_run_sync_sheets_rejects_date_and_explicit_range_together(
     make_space: Callable[..., JiraSpace],
 ) -> None:
-    settings = _settings(make_space(google_sheets_ids={2025: "sheet"}))
+    settings = _settings(make_space(), google_sheets_ids={2025: "sheet"})
     publisher = cast(SpreadsheetPublisher, object())
 
     with pytest.raises(ValueError, match="Use either --date or --from/--to"):
@@ -849,7 +850,12 @@ def test_run_sync_bigquery_rejects_date_and_explicit_range_together(
         )
 
 
-def _settings(space: JiraSpace) -> AppSettings:
+def _settings(
+    space: JiraSpace,
+    *,
+    board_id: int | None = None,
+    google_sheets_ids: dict[int, str] | None = None,
+) -> AppSettings:
     return AppSettings(
         jira=JiraSettings(
             base_url="https://example.atlassian.net",
@@ -874,4 +880,11 @@ def _settings(space: JiraSpace) -> AppSettings:
             table="worklogs",
         ),
         timezone_name="Europe/Warsaw",
+        configured_spaces=(
+            ConfiguredSpace(
+                space=space,
+                board_id=board_id,
+                google_sheets_ids=tuple(sorted((google_sheets_ids or {}).items())),
+            ),
+        ),
     )

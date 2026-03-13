@@ -104,13 +104,6 @@ class JiraSpace:
     key: str
     name: str
     slug: str
-    board_id: int | None = None
-    google_sheets_ids: dict[int, str] | None = None
-
-    @property
-    def safe_google_sheets_ids(self) -> dict[int, str]:
-        """Returns configured yearly spreadsheet IDs or an empty mapping."""
-        return self.google_sheets_ids or {}
 
 
 @dataclass(frozen=True)

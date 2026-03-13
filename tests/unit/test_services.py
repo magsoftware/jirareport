@@ -318,12 +318,7 @@ def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
     source = FakeWorklogSource(worklogs)
     publisher = FakeSpreadsheetPublisher()
     resolver = FakeSpreadsheetResolver({2026: "sheet-2026"})
-    space = make_space(
-        key="PRJ",
-        name="Project",
-        slug="project",
-        google_sheets_ids={2026: "sheet-2026"},
-    )
+    space = make_space(key="PRJ", name="Project", slug="project")
     service = SheetsSyncService(
         source=source,
         publisher=publisher,
@@ -381,12 +376,7 @@ def test_sync_sheets_range_builds_monthly_tabs_for_explicit_window(
     source = FakeWorklogSource(worklogs)
     publisher = FakeSpreadsheetPublisher()
     resolver = FakeSpreadsheetResolver({2025: "sheet-2025"})
-    space = make_space(
-        key="PRJ",
-        name="Project",
-        slug="project",
-        google_sheets_ids={2025: "sheet-2025"},
-    )
+    space = make_space(key="PRJ", name="Project", slug="project")
     service = SheetsSyncService(
         source=source,
         publisher=publisher,

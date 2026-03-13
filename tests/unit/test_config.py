@@ -108,7 +108,9 @@ def test_load_settings_enables_google_sheets_when_space_has_ids(
     settings = load_settings()
 
     assert settings.sheets.enabled is True
-    assert settings.spaces[0].safe_google_sheets_ids == {2026: "sheet-2026"}
+    assert settings.configured_space(settings.spaces[0]).google_sheets_id_map() == {
+        2026: "sheet-2026"
+    }
 
 
 def test_load_settings_enables_bigquery_when_project_and_dataset_are_configured(

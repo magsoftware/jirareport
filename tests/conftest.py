@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from jirareport.domain.models import JiraSpace, WorklogEntry
+from jirareport.infrastructure.config import ConfiguredSpace
 
 
 @pytest.fixture
@@ -51,15 +52,31 @@ def make_space() -> Callable[..., JiraSpace]:
         key: str = "PRJ",
         name: str = "Project",
         slug: str = "project",
-        board_id: int | None = None,
-        google_sheets_ids: dict[int, str] | None = None,
     ) -> JiraSpace:
         return JiraSpace(
             key=key,
             name=name,
             slug=slug,
-            board_id=board_id,
-            google_sheets_ids=google_sheets_ids,
         )
 
     return _make_space
+
+
+@pytest.fixture
+def make_configured_space(
+    make_space: Callable[..., JiraSpace],
+) -> Callable[..., ConfiguredSpace]:
+    def _make_configured_space(
+        key: str = "PRJ",
+        name: str = "Project",
+        slug: str = "project",
+        board_id: int | None = None,
+        google_sheets_ids: dict[int, str] | None = None,
+    ) -> ConfiguredSpace:
+        return ConfiguredSpace(
+            space=make_space(key=key, name=name, slug=slug),
+            board_id=board_id,
+            google_sheets_ids=tuple(sorted((google_sheets_ids or {}).items())),
+        )
+
+    return _make_configured_space

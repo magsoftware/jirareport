@@ -106,7 +106,6 @@ def serialize_space(space: JiraSpace) -> dict[str, object]:
         "key": space.key,
         "name": space.name,
         "slug": space.slug,
-        "board_id": space.board_id,
     }
 
 

@@ -385,8 +385,9 @@ def _build_spreadsheet_resolver(
     """Builds the configured yearly spreadsheet resolver."""
     if not settings.sheets.enabled:
         raise ValueError("Google Sheets publishing is disabled.")
+    configured_space = settings.configured_space(space)
     return GoogleSheetsResolver(
-        spreadsheet_ids=dict(space.safe_google_sheets_ids),
+        spreadsheet_ids=configured_space.google_sheets_id_map(),
         title_prefix=f"{settings.sheets.title_prefix} - {space.name}",
     )
 
