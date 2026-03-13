@@ -109,8 +109,7 @@ def test_fetch_worklogs_handles_pagination_and_timezone_filtering() -> None:
     assert result[1].author_name == "Bob"
     assert len(session.calls) == 5
     assert session.calls[1][1] == {
-        "jql": 'project = "PRJ" AND worklogDate >= "2026-03-01" '
-        'AND worklogDate <= "2026-03-11" ORDER BY created DESC',
+        "jql": 'project = "PRJ" AND worklogDate >= "2026-03-01" AND worklogDate <= "2026-03-11" ORDER BY created DESC',
         "maxResults": 100,
         "fields": "summary,issuetype",
         "nextPageToken": "page-2-token",

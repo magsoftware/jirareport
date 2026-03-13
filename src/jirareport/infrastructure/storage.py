@@ -3,12 +3,41 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Protocol, cast
 
-from jirareport.domain.ports import CuratedDatasetStorage, JsonReportStorage
+from jirareport.domain.ports import (
+    CuratedDatasetStorage,
+    JsonObject,
+    JsonReportStorage,
+)
 
-JsonPayload = dict[str, Any]
-GcsClientFactory = Callable[[], Any]
+
+class GcsBlobProtocol(Protocol):
+    """Describes the subset of blob behavior used by the storage adapters."""
+
+    def upload_from_string(self, data: str | bytes, content_type: str) -> None:
+        """Uploads raw bytes or text to the blob."""
+
+    def download_as_bytes(self) -> bytes:
+        """Downloads raw blob data."""
+
+
+class GcsBucketProtocol(Protocol):
+    """Describes the subset of bucket behavior used by the storage adapters."""
+
+    def blob(self, blob_name: str) -> GcsBlobProtocol:
+        """Returns a handle to one blob."""
+
+
+class GcsClientProtocol(Protocol):
+    """Describes the subset of GCS client behavior used by the adapters."""
+
+    def bucket(self, bucket_name: str) -> GcsBucketProtocol:
+        """Returns a handle to one bucket."""
+
+
+JsonPayload = JsonObject
+GcsClientFactory = Callable[[], GcsClientProtocol]
 PARQUET_CONTENT_TYPE = "application/vnd.apache.parquet"
 
 
@@ -143,8 +172,8 @@ def _blob_name(prefix: str, path: str) -> str:
     return f"{prefix}/{path}" if prefix else path
 
 
-def _default_gcs_client_factory() -> Any:
+def _default_gcs_client_factory() -> GcsClientProtocol:
     """Builds the default Google Cloud Storage client."""
     import google.cloud.storage as storage
 
-    return storage.Client()
+    return cast(GcsClientProtocol, storage.Client())

@@ -8,12 +8,13 @@ from jirareport.domain.models import (
     MonthlyWorklogReport,
     WorklogEntry,
 )
+from jirareport.domain.ports import JsonObject, JsonValue
 
 
 def serialize_worklog(
     entry: WorklogEntry,
     snapshot_date: str | None = None,
-) -> dict[str, object]:
+) -> JsonObject:
     """Serializes a normalized worklog entry to JSON-friendly data.
 
     Args:
@@ -23,7 +24,7 @@ def serialize_worklog(
     Returns:
         A JSON-serializable dictionary representing one worklog.
     """
-    payload: dict[str, object] = {
+    payload: JsonObject = {
         "worklog_id": entry.worklog_id,
         "issue_key": entry.issue_key,
         "summary": entry.issue_summary,
@@ -42,7 +43,9 @@ def serialize_worklog(
     if snapshot_date is not None:
         payload["snapshot_date"] = snapshot_date
     return payload
-def serialize_daily_snapshot(snapshot: DailyRawSnapshot) -> dict[str, object]:
+
+
+def serialize_daily_snapshot(snapshot: DailyRawSnapshot) -> JsonObject:
     """Serializes the raw daily snapshot payload.
 
     Args:
@@ -52,10 +55,7 @@ def serialize_daily_snapshot(snapshot: DailyRawSnapshot) -> dict[str, object]:
         A JSON-serializable dictionary for the raw daily report.
     """
     snapshot_date = snapshot.snapshot_date.isoformat()
-    worklogs = [
-        serialize_worklog(entry, snapshot_date=snapshot_date)
-        for entry in snapshot.worklogs
-    ]
+    worklogs: list[JsonValue] = [serialize_worklog(entry, snapshot_date=snapshot_date) for entry in snapshot.worklogs]
     return {
         "report_type": "daily_raw_snapshot",
         "project_key": snapshot.project_key,
@@ -69,7 +69,7 @@ def serialize_daily_snapshot(snapshot: DailyRawSnapshot) -> dict[str, object]:
     }
 
 
-def serialize_monthly_report(report: MonthlyWorklogReport) -> dict[str, object]:
+def serialize_monthly_report(report: MonthlyWorklogReport) -> JsonObject:
     """Serializes a derived monthly report.
 
     Args:
@@ -78,7 +78,7 @@ def serialize_monthly_report(report: MonthlyWorklogReport) -> dict[str, object]:
     Returns:
         A JSON-serializable dictionary for the monthly report.
     """
-    tickets = []
+    tickets: list[JsonValue] = []
     for ticket in report.tickets:
         tickets.append(
             {
@@ -100,7 +100,7 @@ def serialize_monthly_report(report: MonthlyWorklogReport) -> dict[str, object]:
     }
 
 
-def serialize_space(space: JiraSpace) -> dict[str, object]:
+def serialize_space(space: JiraSpace) -> JsonObject:
     """Serializes Jira space metadata for JSON report payloads."""
     return {
         "key": space.key,

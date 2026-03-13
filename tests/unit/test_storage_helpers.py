@@ -20,8 +20,9 @@ def test_storage_builders_reject_missing_bucket_for_gcs(tmp_path: Path) -> None:
 def test_default_gcs_client_factory_uses_google_storage_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    fake_client = object()
     fake_storage_module = cast(Any, ModuleType("storage"))
-    fake_storage_module.Client = lambda: "fake-client"
+    fake_storage_module.Client = lambda: fake_client
     fake_cloud_module = cast(Any, ModuleType("google.cloud"))
     fake_cloud_module.storage = fake_storage_module
     fake_google_module = cast(Any, ModuleType("google"))
@@ -32,4 +33,4 @@ def test_default_gcs_client_factory_uses_google_storage_client(
 
     client = storage._default_gcs_client_factory()
 
-    assert client == "fake-client"
+    assert client is fake_client

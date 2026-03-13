@@ -126,10 +126,7 @@ def test_daily_snapshot_generates_raw_and_monthly_reports(
 
     result = service.generate(date(2026, 3, 11))
 
-    assert (
-        result.snapshot_path
-        == "spaces/PRJ/project/raw/daily/2026/03/2026-03-11.json"
-    )
+    assert result.snapshot_path == "spaces/PRJ/project/raw/daily/2026/03/2026-03-11.json"
     assert result.monthly_paths == (
         "spaces/PRJ/project/derived/monthly/2026/2026-02.json",
         "spaces/PRJ/project/derived/monthly/2026/2026-03.json",
@@ -144,9 +141,7 @@ def test_daily_snapshot_generates_raw_and_monthly_reports(
     assert raw_payload["space"]["slug"] == "project"
     assert len(raw_payload["worklogs"]) == 3
     assert raw_payload["worklogs"][0]["issue_type"] == "Task"
-    march_payload = storage.payloads[
-        "spaces/PRJ/project/derived/monthly/2026/2026-03.json"
-    ]
+    march_payload = storage.payloads["spaces/PRJ/project/derived/monthly/2026/2026-03.json"]
     issue_keys = [ticket["issue_key"] for ticket in march_payload["tickets"]]
     assert issue_keys == ["PRJ-1", "PRJ-2"]
     assert len(march_payload["tickets"][0]["bookings"]) == 2
@@ -227,10 +222,7 @@ def test_monthly_report_filters_to_requested_month(
     result = service.generate(MonthId(year=2026, month=3))
 
     assert result.report_path == "spaces/PRJ/project/derived/monthly/2026/2026-03.json"
-    assert (
-        result.curated_path
-        == "curated/worklogs/space=project/year=2026/month=03/worklogs.parquet"
-    )
+    assert result.curated_path == "curated/worklogs/space=project/year=2026/month=03/worklogs.parquet"
     assert result.ticket_count == 1
     payload = storage.payloads[result.report_path]
     assert payload["month"] == "2026-03"
@@ -329,9 +321,7 @@ def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(
 
     result = service.generate(date(2026, 3, 11))
 
-    assert result.spreadsheet_urls == (
-        "https://docs.google.com/spreadsheets/d/sheet-2026/edit",
-    )
+    assert result.spreadsheet_urls == ("https://docs.google.com/spreadsheets/d/sheet-2026/edit",)
     assert len(publisher.requests) == 1
     assert resolver.years == [2026]
     request = publisher.requests[0]
@@ -385,13 +375,9 @@ def test_sync_sheets_range_builds_monthly_tabs_for_explicit_window(
         timezone_name="Europe/Warsaw",
     )
 
-    result = service.generate_range(
-        DateRange(start=date(2025, 1, 1), end=date(2025, 2, 28))
-    )
+    result = service.generate_range(DateRange(start=date(2025, 1, 1), end=date(2025, 2, 28)))
 
-    assert result.spreadsheet_urls == (
-        "https://docs.google.com/spreadsheets/d/sheet-2025/edit",
-    )
+    assert result.spreadsheet_urls == ("https://docs.google.com/spreadsheets/d/sheet-2025/edit",)
     assert resolver.years == [2025]
     request = publisher.requests[0]
     assert tuple(worksheet.title for worksheet in request.worksheets) == ("01", "02")
@@ -403,37 +389,37 @@ def test_bigquery_sync_loads_active_months_from_curated_storage(
 ) -> None:
     storage = FakeStorage()
     space = make_space(key="PRJ", name="Project", slug="project")
-    storage.binary_payloads[
-        "curated/worklogs/space=project/year=2026/month=02/worklogs.parquet"
-    ] = serialize_monthly_worklogs(
-        space,
-        MonthId(year=2026, month=2),
-        [
-            make_worklog(
-                "feb-1",
-                "PRJ-1",
-                "February work",
-                "Alice",
-                "2026-02-20T09:00:00+01:00",
-                3600,
-            )
-        ],
+    storage.binary_payloads["curated/worklogs/space=project/year=2026/month=02/worklogs.parquet"] = (
+        serialize_monthly_worklogs(
+            space,
+            MonthId(year=2026, month=2),
+            [
+                make_worklog(
+                    "feb-1",
+                    "PRJ-1",
+                    "February work",
+                    "Alice",
+                    "2026-02-20T09:00:00+01:00",
+                    3600,
+                )
+            ],
+        )
     )
-    storage.binary_payloads[
-        "curated/worklogs/space=project/year=2026/month=03/worklogs.parquet"
-    ] = serialize_monthly_worklogs(
-        space,
-        MonthId(year=2026, month=3),
-        [
-            make_worklog(
-                "mar-1",
-                "PRJ-2",
-                "March work",
-                "Bob",
-                "2026-03-10T09:00:00+01:00",
-                7200,
-            )
-        ],
+    storage.binary_payloads["curated/worklogs/space=project/year=2026/month=03/worklogs.parquet"] = (
+        serialize_monthly_worklogs(
+            space,
+            MonthId(year=2026, month=3),
+            [
+                make_worklog(
+                    "mar-1",
+                    "PRJ-2",
+                    "March work",
+                    "Bob",
+                    "2026-03-10T09:00:00+01:00",
+                    7200,
+                )
+            ],
+        )
     )
     warehouse = FakeWorklogWarehouse()
     service = BigQuerySyncService(
@@ -453,16 +439,12 @@ def test_bigquery_sync_loads_active_months_from_curated_storage(
         (
             "project",
             "2026-02",
-            storage.binary_payloads[
-                "curated/worklogs/space=project/year=2026/month=02/worklogs.parquet"
-            ],
+            storage.binary_payloads["curated/worklogs/space=project/year=2026/month=02/worklogs.parquet"],
         ),
         (
             "project",
             "2026-03",
-            storage.binary_payloads[
-                "curated/worklogs/space=project/year=2026/month=03/worklogs.parquet"
-            ],
+            storage.binary_payloads["curated/worklogs/space=project/year=2026/month=03/worklogs.parquet"],
         ),
     ]
     assert warehouse.views_ensured is True

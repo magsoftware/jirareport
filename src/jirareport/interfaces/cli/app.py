@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable, Sequence
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -36,6 +36,11 @@ from jirareport.infrastructure.storage import (
     build_curated_dataset_storage,
     build_json_report_storage,
 )
+
+if TYPE_CHECKING:
+    type SubparsersAction = argparse._SubParsersAction[argparse.ArgumentParser]
+else:
+    SubparsersAction = argparse._SubParsersAction
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -90,7 +95,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_daily_parser(subparsers: Any) -> None:
+def _add_daily_parser(subparsers: SubparsersAction) -> None:
     """Registers the daily command parser."""
     daily = subparsers.add_parser(
         "daily",
@@ -103,10 +108,7 @@ def _add_daily_parser(subparsers: Any) -> None:
     daily.add_argument(
         "--date",
         type=str,
-        help=(
-            "Reference date in YYYY-MM-DD format. "
-            "Defaults to the current date in REPORT_TIMEZONE."
-        ),
+        help=("Reference date in YYYY-MM-DD format. Defaults to the current date in REPORT_TIMEZONE."),
     )
     daily.add_argument(
         "--space",
@@ -116,15 +118,14 @@ def _add_daily_parser(subparsers: Any) -> None:
 
 
 def _add_backfill_parser(
-    subparsers: Any,
+    subparsers: SubparsersAction,
 ) -> None:
     """Registers the historical backfill command parser."""
     backfill = subparsers.add_parser(
         "backfill",
         help="Generate monthly reports for an explicit historical date range.",
         description=(
-            "Fetch worklogs for the requested date range and rebuild every "
-            "monthly report touched by that range."
+            "Fetch worklogs for the requested date range and rebuild every monthly report touched by that range."
         ),
     )
     backfill.add_argument(
@@ -149,24 +150,18 @@ def _add_backfill_parser(
 
 
 def _add_monthly_parser(
-    subparsers: Any,
+    subparsers: SubparsersAction,
 ) -> None:
     """Registers the ad hoc monthly command parser."""
     monthly = subparsers.add_parser(
         "monthly",
         help="Generate a derived report for a single target month.",
-        description=(
-            "Generate a monthly report for a single calendar month "
-            "without creating a daily raw snapshot."
-        ),
+        description=("Generate a monthly report for a single calendar month without creating a daily raw snapshot."),
     )
     monthly.add_argument(
         "--month",
         type=str,
-        help=(
-            "Target month in YYYY-MM format. "
-            "Defaults to the current month in REPORT_TIMEZONE."
-        ),
+        help=("Target month in YYYY-MM format. Defaults to the current month in REPORT_TIMEZONE."),
     )
     monthly.add_argument(
         "--space",
@@ -175,7 +170,7 @@ def _add_monthly_parser(
     )
 
 
-def _add_sync_parser(subparsers: Any) -> None:
+def _add_sync_parser(subparsers: SubparsersAction) -> None:
     """Registers synchronization targets."""
     sync = subparsers.add_parser(
         "sync",
@@ -192,7 +187,7 @@ def _add_sync_parser(subparsers: Any) -> None:
 
 
 def _add_sync_sheets_parser(
-    subparsers: Any,
+    subparsers: SubparsersAction,
 ) -> None:
     """Registers the Google Sheets synchronization parser."""
     sheets = subparsers.add_parser(
@@ -206,10 +201,7 @@ def _add_sync_sheets_parser(
     sheets.add_argument(
         "--date",
         type=str,
-        help=(
-            "Reference date in YYYY-MM-DD format. "
-            "Defaults to the current date in REPORT_TIMEZONE."
-        ),
+        help=("Reference date in YYYY-MM-DD format. Defaults to the current date in REPORT_TIMEZONE."),
     )
     sheets.add_argument(
         "--from",
@@ -231,7 +223,7 @@ def _add_sync_sheets_parser(
 
 
 def _add_sync_bigquery_parser(
-    subparsers: Any,
+    subparsers: SubparsersAction,
 ) -> None:
     """Registers the BigQuery synchronization parser."""
     bigquery = subparsers.add_parser(
@@ -245,10 +237,7 @@ def _add_sync_bigquery_parser(
     bigquery.add_argument(
         "--date",
         type=str,
-        help=(
-            "Operational reference date in YYYY-MM-DD format. "
-            "Defaults to the current date in REPORT_TIMEZONE."
-        ),
+        help=("Operational reference date in YYYY-MM-DD format. Defaults to the current date in REPORT_TIMEZONE."),
     )
     bigquery.add_argument(
         "--from",
@@ -449,10 +438,7 @@ def _run_daily(
         )
         result = service.generate(reference_date)
         logger.info(
-            (
-                "Daily snapshot for {} saved to {} "
-                "with {} worklogs across {} curated month(s)."
-            ),
+            ("Daily snapshot for {} saved to {} with {} worklogs across {} curated month(s)."),
             space.slug,
             result.snapshot_path,
             result.worklog_count,
@@ -486,10 +472,7 @@ def _run_backfill(
         )
         result = service.generate(window)
         logger.info(
-            (
-                "Historical backfill for {} produced {} "
-                "monthly report(s) from {} worklogs."
-            ),
+            ("Historical backfill for {} produced {} monthly report(s) from {} worklogs."),
             space.slug,
             result.month_count,
             result.worklog_count,
@@ -509,11 +492,7 @@ def _run_monthly(
     dataset_storage: CuratedDatasetStorage,
 ) -> int:
     """Runs the ad hoc monthly report generation use case."""
-    month = (
-        MonthId.parse(input_month)
-        if input_month
-        else MonthId.from_date(current_date(settings.timezone_name))
-    )
+    month = MonthId.parse(input_month) if input_month else MonthId.from_date(current_date(settings.timezone_name))
 
     def run_for_space(space: JiraSpace) -> None:
         service = MonthlyReportService(

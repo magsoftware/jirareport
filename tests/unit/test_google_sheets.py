@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, cast
 
 from jirareport.domain.models import SpreadsheetPublishRequest, WorksheetData
@@ -16,7 +17,7 @@ class FakeRequest:
     def __init__(self, response: dict[str, Any] | None = None) -> None:
         self.response = response or {}
 
-    def execute(self) -> dict[str, Any]:
+    def execute(self) -> Mapping[str, object]:
         return self.response
 
 
@@ -30,7 +31,7 @@ class FakeValuesApi:
         *,
         spreadsheetId: str,
         range: str,
-        body: dict[str, object],
+        body: Mapping[str, object],
     ) -> FakeRequest:
         self.cleared.append((spreadsheetId, range))
         return FakeRequest()
@@ -41,7 +42,7 @@ class FakeValuesApi:
         spreadsheetId: str,
         range: str,
         valueInputOption: str,
-        body: dict[str, object],
+        body: Mapping[str, object],
     ) -> FakeRequest:
         values = body["values"]
         assert isinstance(values, list)
@@ -53,7 +54,7 @@ class FakeSpreadsheetsApi:
     def __init__(self, titles: list[str], locale: str = "en_US") -> None:
         self.values_api = FakeValuesApi()
         self.created_tabs: list[str] = []
-        self.batch_updates: list[dict[str, object]] = []
+        self.batch_updates: list[Mapping[str, object]] = []
         self.created_spreadsheets: list[str] = []
         self.sheet_ids = {title: index + 1 for index, title in enumerate(titles)}
         self.locale = locale
@@ -63,8 +64,7 @@ class FakeSpreadsheetsApi:
         response = {
             "properties": {"locale": self.locale},
             "sheets": [
-                {"properties": {"title": title, "sheetId": sheet_id}}
-                for title, sheet_id in self.sheet_ids.items()
+                {"properties": {"title": title, "sheetId": sheet_id}} for title, sheet_id in self.sheet_ids.items()
             ],
         }
         return FakeRequest(response)
@@ -73,7 +73,7 @@ class FakeSpreadsheetsApi:
         self,
         *,
         spreadsheetId: str,
-        body: dict[str, object],
+        body: Mapping[str, object],
     ) -> FakeRequest:
         requests = body["requests"]
         assert isinstance(requests, list)
@@ -87,7 +87,7 @@ class FakeSpreadsheetsApi:
             self.sheet_ids[title] = len(self.sheet_ids) + 1
         return FakeRequest()
 
-    def create(self, *, body: dict[str, object], fields: str) -> FakeRequest:
+    def create(self, *, body: Mapping[str, object], fields: str) -> FakeRequest:
         properties = body["properties"]
         assert isinstance(properties, dict)
         title = properties["title"]
@@ -113,8 +113,7 @@ class FakeSheetsService:
         return self.spreadsheets_api
 
 
-def test_google_sheets_publisher_creates_missing_month_tabs_and_formats_raw_columns(
-) -> None:
+def test_google_sheets_publisher_creates_missing_month_tabs_and_formats_raw_columns() -> None:
     service = FakeSheetsService(["02"], locale="en_US")
     publisher = GoogleSheetsPublisher(service_factory=lambda: service)
     request = SpreadsheetPublishRequest(
@@ -194,10 +193,7 @@ def test_google_sheets_publisher_creates_missing_month_tabs_and_formats_raw_colu
         if "repeatCell" in request_item
     ]
     assert any(
-        item["cell"]["userEnteredFormat"]
-        .get("numberFormat", {})
-        .get("pattern")
-        == "0.00"
+        item["cell"]["userEnteredFormat"].get("numberFormat", {}).get("pattern") == "0.00"
         for item in repeat_cell_requests
     )
     assert any("setBasicFilter" in request_item for request_item in formatting_requests)
@@ -242,15 +238,10 @@ def test_google_sheets_resolver_creates_missing_yearly_spreadsheet() -> None:
 
     target = resolver.resolve(2027)
 
-    assert service.spreadsheets_api.created_spreadsheets == [
-        "Jira Worklog Analytics 2027"
-    ]
+    assert service.spreadsheets_api.created_spreadsheets == ["Jira Worklog Analytics 2027"]
     assert target.year == 2027
     assert target.spreadsheet_id == "created-2027"
-    assert (
-        target.spreadsheet_url
-        == "https://docs.google.com/spreadsheets/d/created-2027/edit"
-    )
+    assert target.spreadsheet_url == "https://docs.google.com/spreadsheets/d/created-2027/edit"
 
 
 def test_google_sheets_resolver_reuses_existing_spreadsheet_id() -> None:
@@ -277,7 +268,10 @@ def test_basic_filter_request_returns_none_for_empty_worksheet() -> None:
 
 def test_number_format_requests_skip_short_or_non_monthly_worksheets() -> None:
     assert _number_format_requests(1, WorksheetData("01", (("header",),))) == []
-    assert _number_format_requests(
-        1,
-        WorksheetData("raw", (("header", "value"), ("a", 1))),
-    ) == []
+    assert (
+        _number_format_requests(
+            1,
+            WorksheetData("raw", (("header", "value"), ("a", 1))),
+        )
+        == []
+    )

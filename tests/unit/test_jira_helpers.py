@@ -124,9 +124,7 @@ def test_search_issues_falls_back_to_short_page_without_total() -> None:
         ),
     )
 
-    issues = source._search_issues(
-        DateRange(start=date(2026, 3, 1), end=date(2026, 3, 31))
-    )
+    issues = source._search_issues(DateRange(start=date(2026, 3, 1), end=date(2026, 3, 31)))
 
     assert [issue.key for issue in issues] == ["PRJ-1", "PRJ-2"]
     assert [issue.issue_type for issue in issues] == ["Bug", "Story"]

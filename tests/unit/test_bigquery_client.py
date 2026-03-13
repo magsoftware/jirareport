@@ -91,10 +91,7 @@ def test_bigquery_warehouse_loads_month_slice_from_parquet() -> None:
     assert len(client.queries) == 3
     assert "worklogs" in client.tables
     assert "ADD COLUMN IF NOT EXISTS issue_type" in client.queries[0][0]
-    assert (
-        "DELETE FROM `jira-report-489919.jirareport.worklogs`"
-        in client.queries[1][0]
-    )
+    assert "DELETE FROM `jira-report-489919.jirareport.worklogs`" in client.queries[1][0]
     assert "GROUP BY worklog_id" in client.queries[2][0]
     assert client.loads[0][0] == payload
     assert client.loads[0][1] == "jira-report-489919.jirareport.worklogs"
@@ -146,10 +143,7 @@ def test_bigquery_warehouse_rejects_duplicate_worklog_ids_after_load() -> None:
 
     assert len(client.queries) == 4
     assert "GROUP BY worklog_id" in client.queries[2][0]
-    assert (
-        "DELETE FROM `jira-report-489919.jirareport.worklogs`"
-        in client.queries[3][0]
-    )
+    assert "DELETE FROM `jira-report-489919.jirareport.worklogs`" in client.queries[3][0]
 
 
 def test_bigquery_warehouse_ensures_reporting_views() -> None:
@@ -253,10 +247,7 @@ def test_reporting_views_reference_source_table() -> None:
     assert "all_spaces_by_issue" in views
     assert "click_price_by_issue" in views
     assert "data_fixer_by_issue" in views
-    assert (
-        "FROM `jira-report-489919.jirareport.worklogs`"
-        in views["all_spaces_by_issue"]
-    )
+    assert "FROM `jira-report-489919.jirareport.worklogs`" in views["all_spaces_by_issue"]
     assert "issue_type" in views["all_spaces_by_issue"]
     assert "WHERE space_slug = 'click-price'" in views["click_price_by_issue"]
     assert "WHERE space_slug = 'data-fixer'" in views["data_fixer_by_issue"]
@@ -272,7 +263,4 @@ def test_team_daily_view_aggregates_team_without_author_columns() -> None:
     assert "author_account_id" in views["click_price_author_daily"]
     assert "author_name" not in views["click_price_team_daily"]
     assert "author_account_id" not in views["click_price_team_daily"]
-    assert (
-        "GROUP BY date, space_key, space_name, report_month, space_slug"
-        in views["click_price_team_daily"]
-    )
+    assert "GROUP BY date, space_key, space_name, report_month, space_slug" in views["click_price_team_daily"]

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 import yaml
 from dotenv import load_dotenv
@@ -159,7 +160,7 @@ def _load_configured_spaces() -> tuple[ConfiguredSpace, ...]:
     return spaces
 
 
-def _load_yaml_mapping(path: Path) -> dict[str, Any]:
+def _load_yaml_mapping(path: Path) -> dict[str, object]:
     """Loads a YAML file and validates that it contains a top-level mapping."""
     if not path.exists():
         raise ValueError(f"Missing spaces configuration file: {path}")
@@ -167,12 +168,12 @@ def _load_yaml_mapping(path: Path) -> dict[str, Any]:
         payload = yaml.safe_load(handle)
     if not isinstance(payload, dict):
         raise ValueError("Spaces configuration must be a YAML mapping.")
-    return cast(dict[str, Any], payload)
+    return cast(dict[str, object], payload)
 
 
-def _parse_configured_space(raw: Any) -> ConfiguredSpace:
+def _parse_configured_space(raw: object) -> ConfiguredSpace:
     """Parses one configured reporting space from YAML data."""
-    if not isinstance(raw, dict):
+    if not isinstance(raw, Mapping):
         raise ValueError("Each space configuration entry must be a mapping.")
     key = _required_mapping_string(raw, "key")
     name = _required_mapping_string(raw, "name")
@@ -190,7 +191,7 @@ def _parse_configured_space(raw: Any) -> ConfiguredSpace:
     )
 
 
-def _required_mapping_string(raw: dict[str, Any], key: str) -> str:
+def _required_mapping_string(raw: Mapping[str, object], key: str) -> str:
     """Returns a required non-empty string from a config mapping."""
     value = raw.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -199,7 +200,7 @@ def _required_mapping_string(raw: dict[str, Any], key: str) -> str:
     return value.strip()
 
 
-def _optional_mapping_int(raw: dict[str, Any], key: str) -> int | None:
+def _optional_mapping_int(raw: Mapping[str, object], key: str) -> int | None:
     """Returns an optional integer from a config mapping."""
     value = raw.get(key)
     if value in {None, ""}:
@@ -209,11 +210,11 @@ def _optional_mapping_int(raw: dict[str, Any], key: str) -> int | None:
     return value
 
 
-def _parse_sheet_ids(raw: Any) -> tuple[tuple[int, str], ...]:
+def _parse_sheet_ids(raw: object) -> tuple[tuple[int, str], ...]:
     """Parses per-year spreadsheet IDs from a config mapping."""
     if raw is None or raw == "":
         return ()
-    if not isinstance(raw, dict):
+    if not isinstance(raw, Mapping):
         message = "'google_sheets_ids' must be a mapping of year to spreadsheet ID."
         raise ValueError(message)
     result: list[tuple[int, str]] = []
@@ -249,10 +250,7 @@ def _sheets_enabled_from_env(configured_spaces: tuple[ConfiguredSpace, ...]) -> 
     """Determines whether Google Sheets publishing is enabled."""
     raw_value = os.getenv("GOOGLE_SHEETS_ENABLED")
     if raw_value in {None, ""}:
-        return any(
-            configured_space.google_sheets_ids
-            for configured_space in configured_spaces
-        )
+        return any(configured_space.google_sheets_ids for configured_space in configured_spaces)
     assert raw_value is not None
     normalized = raw_value.lower().strip()
     if normalized in {"1", "true", "yes", "on"}:

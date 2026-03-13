@@ -58,10 +58,7 @@ def build_spreadsheet_request(
 
 def years_for_snapshot(snapshot: DailyRawSnapshot) -> tuple[int, ...]:
     """Returns all calendar years touched by the active reporting months."""
-    years = {
-        month.year
-        for month in months_in_range(snapshot.window)
-    }
+    years = {month.year for month in months_in_range(snapshot.window)}
     return tuple(sorted(years))
 
 
@@ -70,11 +67,7 @@ def _months_for_year(
     year: int,
 ) -> tuple[MonthId, ...]:
     """Returns active reporting months that belong to the requested spreadsheet year."""
-    return tuple(
-        month
-        for month in months_in_range(snapshot.window)
-        if month.year == year
-    )
+    return tuple(month for month in months_in_range(snapshot.window) if month.year == year)
 
 
 def _worksheet_title(month: MonthId) -> str:

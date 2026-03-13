@@ -247,9 +247,7 @@ def test_main_dispatches_backfill_command(
         lambda *args, **kwargs: fake_backfill,
     )
 
-    result = app.main(
-        ["backfill", "--from", "2025-01-01", "--to", "2025-12-31", "--space", "project"]
-    )
+    result = app.main(["backfill", "--from", "2025-01-01", "--to", "2025-12-31", "--space", "project"])
 
     assert result == 0
     assert fake_backfill.last_window == app._explicit_window("2025-01-01", "2025-12-31")
@@ -302,9 +300,7 @@ def test_main_dispatches_sync_bigquery_command(
     monkeypatch.setattr(app, "_build_worklog_warehouse", lambda settings: object())
     monkeypatch.setattr(app, "BigQuerySyncService", lambda *args, **kwargs: fake_sync)
 
-    result = app.main(
-        ["sync", "bigquery", "--date", "2026-03-11", "--space", "project"]
-    )
+    result = app.main(["sync", "bigquery", "--date", "2026-03-11", "--space", "project"])
 
     assert result == 0
     assert fake_sync.last_date == date(2026, 3, 11)

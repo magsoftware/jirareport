@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from io import BytesIO
-from typing import IO, Any, Protocol, cast
+from typing import IO, Protocol, cast
 
 import pyarrow.parquet as pq
 from google.cloud import bigquery
@@ -32,7 +32,7 @@ class BigQueryClientProtocol(Protocol):
     def load_table_from_file(
         self,
         file_obj: IO[bytes],
-        destination: Any,
+        destination: str | bigquery.Table | bigquery.TableReference,
         rewind: bool = False,
         size: int | None = None,
         num_retries: int = 6,
@@ -128,8 +128,7 @@ class BigQueryWorklogWarehouse:
             _delete_month_slice(client, self._table_ref, space.slug, month.label())
             formatted_ids = ", ".join(duplicate_ids)
             raise ValueError(
-                "Duplicate worklog_id values detected for "
-                f"space={space.slug} month={month.label()}: {formatted_ids}"
+                f"Duplicate worklog_id values detected for space={space.slug} month={month.label()}: {formatted_ids}"
             )
 
     def ensure_views(self) -> None:
@@ -163,10 +162,7 @@ def _delete_month_slice(
     report_month: str,
 ) -> None:
     """Deletes the current month slice before reloading curated worklogs."""
-    query = (
-        f"DELETE FROM `{table_ref}` "
-        "WHERE space_slug = @space_slug AND report_month = @report_month"
-    )
+    query = f"DELETE FROM `{table_ref}` WHERE space_slug = @space_slug AND report_month = @report_month"
     config = bigquery.QueryJobConfig(
         query_parameters=[
             bigquery.ScalarQueryParameter("space_slug", "STRING", space_slug),
@@ -258,23 +254,15 @@ def _duplicate_worklog_ids(
         ]
     )
     result = client.query(query, job_config=config).result()
-    return [str(row["worklog_id"]) for row in cast(Iterable[Any], result)]
+    return [str(row["worklog_id"]) for row in cast(Iterable[Mapping[str, object]], result)]
 
 
 def _duplicate_worklog_ids_in_parquet(parquet_payload: bytes) -> list[str]:
     """Returns duplicate worklog IDs detected directly in a Parquet payload."""
     table = pq.read_table(BytesIO(parquet_payload), columns=["worklog_id"])
-    values = [
-        str(value)
-        for value in table.column("worklog_id").to_pylist()
-        if value not in {None, ""}
-    ]
+    values = [str(value) for value in table.column("worklog_id").to_pylist() if value not in {None, ""}]
     counts = Counter(values)
-    duplicates = sorted(
-        worklog_id
-        for worklog_id, count in counts.items()
-        if count > 1
-    )
+    duplicates = sorted(worklog_id for worklog_id, count in counts.items() if count > 1)
     return duplicates[:10]
 
 
@@ -307,11 +295,7 @@ def _reporting_view_queries(
 
 def _worklogs_query(table_ref: str, space_slug: str | None = None) -> str:
     """Builds the raw worklogs view query."""
-    return (
-        "SELECT * "
-        f"FROM `{table_ref}` "
-        f"{_space_filter_clause(space_slug)}"
-    ).strip()
+    return (f"SELECT * FROM `{table_ref}` {_space_filter_clause(space_slug)}").strip()
 
 
 def _by_issue_query(table_ref: str, space_slug: str | None = None) -> str:

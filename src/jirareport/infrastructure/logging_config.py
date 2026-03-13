@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, cast
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from loguru import Record
 
 MAX_LOC_LENGTH = 40
 
@@ -37,7 +40,7 @@ def flush_logging() -> None:
     logger.complete()
 
 
-def _format_location(record: Any) -> bool:
+def _format_location(record: Record) -> bool:
     """Formats the ``location`` field used by the log output template.
 
     Args:
@@ -46,10 +49,12 @@ def _format_location(record: Any) -> bool:
     Returns:
         Always ``True`` so the record is emitted after enrichment.
     """
-    location = f"{record['name']}:{record['function']}:{record['line']}"
+    name = record["name"] or ""
+    location = f"{name}:{record['function']}:{record['line']}"
     if len(location) > MAX_LOC_LENGTH:
         location = location[-MAX_LOC_LENGTH:]
     else:
         location = location.ljust(MAX_LOC_LENGTH)
-    record["extra"]["location"] = location
+    extra = cast(dict[str, object], record["extra"])
+    extra["location"] = location
     return True

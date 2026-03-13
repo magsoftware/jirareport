@@ -3,7 +3,7 @@ from __future__ import annotations
 import runpy
 import sys
 from types import ModuleType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -13,6 +13,11 @@ from jirareport.infrastructure.logging_config import (
     configure_logging,
     flush_logging,
 )
+
+if TYPE_CHECKING:
+    from loguru import Record as LoguruRecord
+else:
+    LoguruRecord = dict[str, object]
 
 
 def test_configure_logging_runs_for_debug_and_info_levels() -> None:
@@ -29,7 +34,7 @@ def test_format_location_populates_and_truncates_extra_field() -> None:
         "extra": {},
     }
 
-    assert _format_location(record) is True
+    assert _format_location(cast(LoguruRecord, record)) is True
     assert "location" in record["extra"]
     assert len(record["extra"]["location"]) == MAX_LOC_LENGTH
 
@@ -42,7 +47,7 @@ def test_format_location_pads_short_location() -> None:
         "extra": {},
     }
 
-    assert _format_location(record) is True
+    assert _format_location(cast(LoguruRecord, record)) is True
     assert record["extra"]["location"] == "mod:fn:1".ljust(MAX_LOC_LENGTH)
 
 

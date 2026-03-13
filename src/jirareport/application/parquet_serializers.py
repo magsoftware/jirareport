@@ -38,10 +38,7 @@ def serialize_monthly_worklogs(
 ) -> bytes:
     """Serializes a flat monthly worklog dataset to Parquet bytes."""
     table = pa.Table.from_pylist(
-        [
-            _monthly_worklog_row(space, month, entry)
-            for entry in worklogs
-        ],
+        [_monthly_worklog_row(space, month, entry) for entry in worklogs],
         schema=MONTHLY_WORKLOG_SCHEMA,
     )
     buffer = BytesIO()

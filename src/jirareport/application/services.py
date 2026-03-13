@@ -311,10 +311,7 @@ class BackfillService(_BaseMonthlyReportService):
             generated_at=generated_at,
         )
         logger.info(
-            (
-                "Completed historical backfill for space {} "
-                "with {} worklogs across {} month(s)."
-            ),
+            ("Completed historical backfill for space {} with {} worklogs across {} month(s)."),
             self._space.slug,
             len(worklogs),
             len(monthly_paths),
@@ -406,10 +403,7 @@ class SheetsSyncService(_BaseSourceService):
         """Logs the end of a Sheets synchronization run."""
         if explicit_range:
             logger.info(
-                (
-                    "Published {} worklogs to {} spreadsheet(s) "
-                    "for explicit range in space {}."
-                ),
+                ("Published {} worklogs to {} spreadsheet(s) for explicit range in space {}."),
                 worklog_count,
                 spreadsheet_count,
                 self._space.slug,
@@ -487,9 +481,7 @@ class BigQuerySyncService:
         )
         worklog_count = 0
         for month in months:
-            payload = self._dataset_storage.read_bytes(
-                _monthly_worklogs_path(self._space, month)
-            )
+            payload = self._dataset_storage.read_bytes(_monthly_worklogs_path(self._space, month))
             worklog_count += count_parquet_rows(payload)
             self._warehouse.load_monthly_worklogs(self._space, month, payload)
             logger.info(
@@ -621,13 +613,10 @@ def _write_monthly_report(
 
 
 def _sorted_tickets(
-    tickets: dict[tuple[str, str, str], list[WorklogEntry]]
+    tickets: dict[tuple[str, str, str], list[WorklogEntry]],
 ) -> list[tuple[str, str, str, list[WorklogEntry]]]:
     """Returns grouped tickets sorted by issue key."""
-    items = [
-        (issue_key, summary, issue_type, entries)
-        for (issue_key, summary, issue_type), entries in tickets.items()
-    ]
+    items = [(issue_key, summary, issue_type, entries) for (issue_key, summary, issue_type), entries in tickets.items()]
     return sorted(items, key=lambda item: (item[0], item[1], item[2]))
 
 
@@ -649,23 +638,14 @@ def _worklogs_for_month(
 
 def _daily_snapshot_path(space: JiraSpace, reference_date: date) -> str:
     """Builds the storage path for a raw daily snapshot."""
-    return (
-        f"spaces/{space.key}/{space.slug}/raw/daily/"
-        f"{reference_date:%Y/%m/%Y-%m-%d}.json"
-    )
+    return f"spaces/{space.key}/{space.slug}/raw/daily/{reference_date:%Y/%m/%Y-%m-%d}.json"
 
 
 def _monthly_report_path(space: JiraSpace, month: MonthId) -> str:
     """Builds the storage path for a derived monthly report."""
-    return (
-        f"spaces/{space.key}/{space.slug}/derived/monthly/"
-        f"{month.year:04d}/{month.label()}.json"
-    )
+    return f"spaces/{space.key}/{space.slug}/derived/monthly/{month.year:04d}/{month.label()}.json"
 
 
 def _monthly_worklogs_path(space: JiraSpace, month: MonthId) -> str:
     """Builds the storage path for a curated monthly worklog dataset."""
-    return (
-        f"curated/worklogs/space={space.slug}/"
-        f"year={month.year:04d}/month={month.month:02d}/worklogs.parquet"
-    )
+    return f"curated/worklogs/space={space.slug}/year={month.year:04d}/month={month.month:02d}/worklogs.parquet"

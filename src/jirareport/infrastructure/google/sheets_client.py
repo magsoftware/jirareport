@@ -1,17 +1,87 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Protocol, cast
 
 from loguru import logger
 
 from jirareport.domain.models import (
+    SheetCellValue,
     SpreadsheetPublishRequest,
     SpreadsheetTarget,
     WorksheetData,
 )
 
-SheetsServiceFactory = Callable[[], Any]
+
+class SheetsRequestProtocol(Protocol):
+    """Describes the subset of request behavior used by the adapter."""
+
+    def execute(self) -> Mapping[str, object]:
+        """Executes one Google Sheets API request."""
+
+
+class SheetsValuesResourceProtocol(Protocol):
+    """Describes the subset of values resource behavior used by the adapter."""
+
+    def clear(
+        self,
+        *,
+        spreadsheetId: str,
+        range: str,
+        body: Mapping[str, object],
+    ) -> SheetsRequestProtocol:
+        """Clears worksheet values in the requested range."""
+
+    def update(
+        self,
+        *,
+        spreadsheetId: str,
+        range: str,
+        valueInputOption: str,
+        body: Mapping[str, object],
+    ) -> SheetsRequestProtocol:
+        """Updates worksheet values starting from the requested cell."""
+
+
+class SpreadsheetsResourceProtocol(Protocol):
+    """Describes the subset of spreadsheets resource behavior used here."""
+
+    def batchUpdate(
+        self,
+        *,
+        spreadsheetId: str,
+        body: Mapping[str, object],
+    ) -> SheetsRequestProtocol:
+        """Applies a batch of spreadsheet changes."""
+
+    def create(
+        self,
+        *,
+        body: Mapping[str, object],
+        fields: str,
+    ) -> SheetsRequestProtocol:
+        """Creates one spreadsheet and returns selected fields."""
+
+    def get(
+        self,
+        *,
+        spreadsheetId: str,
+        fields: str,
+    ) -> SheetsRequestProtocol:
+        """Loads spreadsheet metadata."""
+
+    def values(self) -> SheetsValuesResourceProtocol:
+        """Returns the values resource."""
+
+
+class SheetsServiceProtocol(Protocol):
+    """Describes the subset of the Sheets API client used by the adapter."""
+
+    def spreadsheets(self) -> SpreadsheetsResourceProtocol:
+        """Returns the spreadsheets resource."""
+
+
+SheetsServiceFactory = Callable[[], SheetsServiceProtocol]
 HEADER_COLOR = {"red": 0.87, "green": 0.92, "blue": 0.98}
 
 
@@ -55,16 +125,12 @@ class GoogleSheetsPublisher:
 
     def _ensure_worksheets(
         self,
-        service: Any,
+        service: SheetsServiceProtocol,
         request: SpreadsheetPublishRequest,
     ) -> tuple[dict[str, int], str]:
         """Creates missing tabs before uploading their contents."""
         titles, locale = _spreadsheet_metadata(service, request.spreadsheet_id)
-        missing = [
-            sheet.title
-            for sheet in request.worksheets
-            if sheet.title not in titles
-        ]
+        missing = [sheet.title for sheet in request.worksheets if sheet.title not in titles]
         if missing:
             body = {"requests": [_add_sheet_request(title) for title in missing]}
             service.spreadsheets().batchUpdate(
@@ -99,12 +165,16 @@ class GoogleSheetsResolver:
                 spreadsheet_url=_spreadsheet_url(spreadsheet_id),
             )
         service = self._service_factory()
-        response = service.spreadsheets().create(
-            body={"properties": {"title": f"{self._title_prefix} {year}"}},
-            fields="spreadsheetId,spreadsheetUrl",
-        ).execute()
-        spreadsheet_id = response["spreadsheetId"]
-        spreadsheet_url = response["spreadsheetUrl"]
+        response = (
+            service.spreadsheets()
+            .create(
+                body={"properties": {"title": f"{self._title_prefix} {year}"}},
+                fields="spreadsheetId,spreadsheetUrl",
+            )
+            .execute()
+        )
+        spreadsheet_id = _required_string(response, "spreadsheetId")
+        spreadsheet_url = _required_string(response, "spreadsheetUrl")
         self._spreadsheet_ids[year] = spreadsheet_id
         logger.warning(
             "Created spreadsheet for year {}: {}. Persist GOOGLE_SHEETS_ID_{}={}.",
@@ -121,22 +191,26 @@ class GoogleSheetsResolver:
 
 
 def _spreadsheet_metadata(
-    service: Any,
+    service: SheetsServiceProtocol,
     spreadsheet_id: str,
 ) -> tuple[dict[str, int], str]:
     """Loads worksheet metadata and locale for a spreadsheet."""
-    response = service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id,
-        fields="properties.locale,sheets.properties(title,sheetId)",
-    ).execute()
-    sheets = response.get("sheets", [])
-    return (
-        {
-            sheet["properties"]["title"]: sheet["properties"]["sheetId"]
-            for sheet in sheets
-        },
-        response["properties"]["locale"],
+    response = (
+        service.spreadsheets()
+        .get(
+            spreadsheetId=spreadsheet_id,
+            fields="properties.locale,sheets.properties(title,sheetId)",
+        )
+        .execute()
     )
+    titles: dict[str, int] = {}
+    for sheet in _mapping_list(response.get("sheets")):
+        properties = _mapping_value(sheet, "properties")
+        title = _required_string(properties, "title")
+        sheet_id = _required_int(properties, "sheetId")
+        titles[title] = sheet_id
+    locale = _required_string(_mapping_value(response, "properties"), "locale")
+    return titles, locale
 
 
 def _add_sheet_request(title: str) -> dict[str, dict[str, dict[str, str]]]:
@@ -145,7 +219,7 @@ def _add_sheet_request(title: str) -> dict[str, dict[str, dict[str, str]]]:
 
 
 def _write_worksheet(
-    service: Any,
+    service: SheetsServiceProtocol,
     spreadsheet_id: str,
     worksheet: WorksheetData,
     locale: str,
@@ -165,15 +239,15 @@ def _write_worksheet(
     ).execute()
 
 
-def _worksheet_values(worksheet: WorksheetData, locale: str) -> list[list[Any]]:
+def _worksheet_values(
+    worksheet: WorksheetData,
+    locale: str,
+) -> list[list[SheetCellValue]]:
     """Converts immutable worksheet rows to the API payload format."""
-    return [
-        [_localized_formula(cell, locale) for cell in row]
-        for row in worksheet.rows
-    ]
+    return [[_localized_formula(cell, locale) for cell in row] for row in worksheet.rows]
 
 
-def _localized_formula(value: Any, locale: str) -> Any:
+def _localized_formula(value: SheetCellValue, locale: str) -> SheetCellValue:
     """Localizes known formulas to the destination spreadsheet locale."""
     if not isinstance(value, str) or not value.startswith("="):
         return value
@@ -183,7 +257,7 @@ def _localized_formula(value: Any, locale: str) -> Any:
 
 
 def _format_worksheet(
-    service: Any,
+    service: SheetsServiceProtocol,
     spreadsheet_id: str,
     sheet_id: int,
     worksheet: WorksheetData,
@@ -328,9 +402,7 @@ def _number_format_requests(
     requests: list[dict[str, object]] = []
     if _is_monthly_raw_worksheet(worksheet.title):
         requests.append(_column_number_format_request(sheet_id, 16, 17, "NUMBER", "0"))
-        requests.append(
-            _column_number_format_request(sheet_id, 17, 18, "NUMBER", "0.00")
-        )
+        requests.append(_column_number_format_request(sheet_id, 17, 18, "NUMBER", "0.00"))
     return requests
 
 
@@ -375,8 +447,39 @@ def _spreadsheet_url(spreadsheet_id: str) -> str:
     return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"
 
 
-def _default_sheets_service_factory() -> Any:
+def _default_sheets_service_factory() -> SheetsServiceProtocol:
     """Builds the default authenticated Google Sheets service client."""
     from googleapiclient.discovery import build
 
-    return build("sheets", "v4", cache_discovery=False)
+    return cast(SheetsServiceProtocol, build("sheets", "v4", cache_discovery=False))
+
+
+def _mapping_list(value: object) -> list[Mapping[str, object]]:
+    """Returns only mapping items from an arbitrary list payload."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
+
+def _mapping_value(payload: Mapping[str, object], key: str) -> Mapping[str, object]:
+    """Returns a required mapping entry from an API response payload."""
+    value = payload.get(key)
+    if not isinstance(value, Mapping):
+        raise ValueError(f"Expected mapping field: {key}")
+    return value
+
+
+def _required_string(payload: Mapping[str, object], key: str) -> str:
+    """Returns a required string entry from an API response payload."""
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Expected non-empty string field: {key}")
+    return value
+
+
+def _required_int(payload: Mapping[str, object], key: str) -> int:
+    """Returns a required integer entry from an API response payload."""
+    value = payload.get(key)
+    if not isinstance(value, int):
+        raise ValueError(f"Expected integer field: {key}")
+    return value

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Protocol
 
 from jirareport.domain.models import (
     DateRange,
@@ -10,6 +10,10 @@ from jirareport.domain.models import (
     SpreadsheetTarget,
     WorklogEntry,
 )
+
+type JsonScalar = str | int | float | bool | None
+type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+type JsonObject = dict[str, JsonValue]
 
 
 class WorklogSource(Protocol):
@@ -22,7 +26,7 @@ class WorklogSource(Protocol):
 class JsonReportStorage(Protocol):
     """Persists JSON report payloads to a target storage backend."""
 
-    def write_json(self, path: str, payload: dict[str, Any]) -> str:
+    def write_json(self, path: str, payload: JsonObject) -> str:
         """Writes JSON payload and returns the storage path."""
 
 
