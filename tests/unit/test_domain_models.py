@@ -11,6 +11,14 @@ from jirareport.domain.models import DateRange, MonthId, WorklogEntry
 def test_month_id_parse_rejects_invalid_format() -> None:
     with pytest.raises(ValueError, match="Invalid month format"):
         MonthId.parse("202603")
+    with pytest.raises(ValueError, match="Invalid month format"):
+        MonthId.parse("2026-3")
+    with pytest.raises(ValueError, match="Invalid month format"):
+        MonthId.parse("2026-aa")
+
+
+def test_month_id_parse_accepts_exact_yyyy_mm_format() -> None:
+    assert MonthId.parse("2026-03") == MonthId(year=2026, month=3)
 
 
 def test_month_id_rejects_invalid_month_number() -> None:

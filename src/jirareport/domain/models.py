@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -40,9 +41,9 @@ class MonthId:
         Raises:
             ValueError: If the input does not follow YYYY-MM format.
         """
-        parts = value.split("-")
-        if len(parts) != 2:
+        if not re.fullmatch(r"\d{4}-\d{2}", value):
             raise ValueError(f"Invalid month format: {value}")
+        parts = value.split("-")
         return cls(year=int(parts[0]), month=int(parts[1]))
 
     def label(self) -> str:
