@@ -404,14 +404,11 @@ def _team_daily_query(table_ref: str, space_slug: str | None = None) -> str:
         "space_name, "
         "report_month, "
         "space_slug, "
-        "author_name, "
-        "author_account_id, "
         "ROUND(SUM(duration_hours), 2) AS total_hours "
         f"FROM `{table_ref}` "
         f"{_space_filter_clause(space_slug)}"
         "GROUP BY "
-        "date, space_key, space_name, report_month, space_slug, "
-        "author_name, author_account_id"
+        "date, space_key, space_name, report_month, space_slug"
     ).strip()
 
 

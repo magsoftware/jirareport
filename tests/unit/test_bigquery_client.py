@@ -260,3 +260,19 @@ def test_reporting_views_reference_source_table() -> None:
     assert "issue_type" in views["all_spaces_by_issue"]
     assert "WHERE space_slug = 'click-price'" in views["click_price_by_issue"]
     assert "WHERE space_slug = 'data-fixer'" in views["data_fixer_by_issue"]
+
+
+def test_team_daily_view_aggregates_team_without_author_columns() -> None:
+    views = _reporting_view_queries(
+        "jira-report-489919.jirareport.worklogs",
+        (JiraSpace(key="LA004832", name="Click Price", slug="click-price"),),
+    )
+
+    assert "author_name" in views["click_price_author_daily"]
+    assert "author_account_id" in views["click_price_author_daily"]
+    assert "author_name" not in views["click_price_team_daily"]
+    assert "author_account_id" not in views["click_price_team_daily"]
+    assert (
+        "GROUP BY date, space_key, space_name, report_month, space_slug"
+        in views["click_price_team_daily"]
+    )
