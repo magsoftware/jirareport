@@ -88,6 +88,7 @@ def test_bigquery_warehouse_loads_month_slice_from_parquet() -> None:
     )
 
     assert len(client.queries) == 2
+    assert "worklogs" in client.tables
     assert (
         "DELETE FROM `jira-report-489919.jirareport.worklogs`"
         in client.queries[0][0]

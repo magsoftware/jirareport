@@ -60,6 +60,24 @@ class BigQueryClientProtocol(Protocol):
 
 
 BigQueryClientFactory = Callable[[], BigQueryClientProtocol]
+WORKLOGS_SCHEMA = (
+    bigquery.SchemaField("space_key", "STRING"),
+    bigquery.SchemaField("space_name", "STRING"),
+    bigquery.SchemaField("space_slug", "STRING"),
+    bigquery.SchemaField("report_month", "STRING"),
+    bigquery.SchemaField("worklog_id", "STRING"),
+    bigquery.SchemaField("issue_key", "STRING"),
+    bigquery.SchemaField("issue_summary", "STRING"),
+    bigquery.SchemaField("author_name", "STRING"),
+    bigquery.SchemaField("author_account_id", "STRING"),
+    bigquery.SchemaField("started_at", "STRING"),
+    bigquery.SchemaField("ended_at", "STRING"),
+    bigquery.SchemaField("started_date", "DATE"),
+    bigquery.SchemaField("ended_date", "DATE"),
+    bigquery.SchemaField("crosses_midnight", "BOOL"),
+    bigquery.SchemaField("duration_seconds", "INT64"),
+    bigquery.SchemaField("duration_hours", "FLOAT64"),
+)
 
 
 class BigQueryWorklogWarehouse:
@@ -93,6 +111,7 @@ class BigQueryWorklogWarehouse:
                 f"space={space.slug} month={month.label()}: {formatted_ids}"
             )
         client = self._client_factory()
+        _ensure_worklogs_table(client, self._table_ref)
         _delete_month_slice(client, self._table_ref, space.slug, month.label())
         _load_month_slice(client, self._table_ref, parquet_payload)
         duplicate_ids = _duplicate_worklog_ids(
@@ -148,6 +167,17 @@ def _delete_month_slice(
         ]
     )
     client.query(query, job_config=config).result()
+
+
+def _ensure_worklogs_table(
+    client: BigQueryClientProtocol,
+    table_ref: str,
+) -> None:
+    """Creates the worklogs table when the target dataset is still empty."""
+    table = bigquery.Table(table_ref, schema=list(WORKLOGS_SCHEMA))
+    table.time_partitioning = bigquery.TimePartitioning(field="started_date")
+    table.clustering_fields = ["space_slug", "author_name", "issue_key"]
+    client.create_table(table, exists_ok=True)
 
 
 def _load_month_slice(
