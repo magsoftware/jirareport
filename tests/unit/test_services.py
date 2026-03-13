@@ -134,8 +134,8 @@ def test_daily_snapshot_generates_raw_and_monthly_reports(
         "spaces/PRJ/project/derived/monthly/2026/2026-03.json",
     )
     assert result.curated_paths == (
-        "spaces/PRJ/project/curated/worklogs/year=2026/month=02/worklogs.parquet",
-        "spaces/PRJ/project/curated/worklogs/year=2026/month=03/worklogs.parquet",
+        "curated/worklogs/space=project/year=2026/month=02/worklogs.parquet",
+        "curated/worklogs/space=project/year=2026/month=03/worklogs.parquet",
     )
     assert source.windows == [DateRange(start=date(2026, 2, 1), end=date(2026, 3, 11))]
     raw_payload = storage.payloads[result.snapshot_path]
@@ -189,8 +189,8 @@ def test_daily_snapshot_closes_previous_two_months_on_first_day_of_month(
         "spaces/PRJ/project/derived/monthly/2026/2026-03.json",
     )
     assert result.curated_paths == (
-        "spaces/PRJ/project/curated/worklogs/year=2026/month=02/worklogs.parquet",
-        "spaces/PRJ/project/curated/worklogs/year=2026/month=03/worklogs.parquet",
+        "curated/worklogs/space=project/year=2026/month=02/worklogs.parquet",
+        "curated/worklogs/space=project/year=2026/month=03/worklogs.parquet",
     )
 
 
@@ -226,7 +226,7 @@ def test_monthly_report_filters_to_requested_month(
     assert result.report_path == "spaces/PRJ/project/derived/monthly/2026/2026-03.json"
     assert (
         result.curated_path
-        == "spaces/PRJ/project/curated/worklogs/year=2026/month=03/worklogs.parquet"
+        == "curated/worklogs/space=project/year=2026/month=03/worklogs.parquet"
     )
     assert result.ticket_count == 1
     payload = storage.payloads[result.report_path]
@@ -273,8 +273,8 @@ def test_backfill_generates_monthly_reports_for_explicit_range(
         "spaces/PRJ/project/derived/monthly/2025/2025-02.json",
     )
     assert result.curated_paths == (
-        "spaces/PRJ/project/curated/worklogs/year=2025/month=01/worklogs.parquet",
-        "spaces/PRJ/project/curated/worklogs/year=2025/month=02/worklogs.parquet",
+        "curated/worklogs/space=project/year=2025/month=01/worklogs.parquet",
+        "curated/worklogs/space=project/year=2025/month=02/worklogs.parquet",
     )
 
 
@@ -359,10 +359,10 @@ def test_bigquery_sync_loads_active_months_from_curated_storage(
 ) -> None:
     storage = FakeStorage()
     storage.binary_payloads[
-        "spaces/PRJ/project/curated/worklogs/year=2026/month=02/worklogs.parquet"
+        "curated/worklogs/space=project/year=2026/month=02/worklogs.parquet"
     ] = b"feb"
     storage.binary_payloads[
-        "spaces/PRJ/project/curated/worklogs/year=2026/month=03/worklogs.parquet"
+        "curated/worklogs/space=project/year=2026/month=03/worklogs.parquet"
     ] = b"mar"
     warehouse = FakeWorklogWarehouse()
     service = BigQuerySyncService(

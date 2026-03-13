@@ -519,6 +519,6 @@ def _monthly_report_path(space: JiraSpace, month: MonthId) -> str:
 def _monthly_worklogs_path(space: JiraSpace, month: MonthId) -> str:
     """Builds the storage path for a curated monthly worklog dataset."""
     return (
-        f"spaces/{space.key}/{space.slug}/curated/worklogs/"
+        f"curated/worklogs/space={space.slug}/"
         f"year={month.year:04d}/month={month.month:02d}/worklogs.parquet"
     )
