@@ -19,13 +19,35 @@ def month_range(month: MonthId) -> DateRange:
 
 
 def rolling_window(reference_date: date) -> DateRange:
-    """Builds the rolling daily reporting window.
+    """Builds the operational reporting window for the nightly flow.
 
-    The main daily use case uses this range so that delayed or corrected
-    worklogs from the previous month are still included.
+    Most days the window covers the current and previous month, ending on the
+    reference date itself. On the first day of a month the run is used to
+    close the previous month, so the window shifts back by one month and ends
+    on the last day of the previous month.
     """
-    previous_month = MonthId.from_date(reference_date).previous_month()
+    current_month = MonthId.from_date(reference_date)
+    if reference_date.day == 1:
+        start_month = current_month.previous_month().previous_month()
+        return DateRange(
+            start=start_month.first_day(),
+            end=reference_date - timedelta(days=1),
+        )
+    previous_month = current_month.previous_month()
     return DateRange(start=previous_month.first_day(), end=reference_date)
+
+
+def active_months(reference_date: date) -> tuple[MonthId, MonthId]:
+    """Returns the two active reporting months for the reference date."""
+    months = months_in_range(rolling_window(reference_date))
+    if len(months) != 2:
+        raise ValueError("Operational reporting window must span exactly two months.")
+    return months
+
+
+def explicit_range(start: date, end: date) -> DateRange:
+    """Builds an explicit user-requested date range for backfills."""
+    return DateRange(start=start, end=end)
 
 
 def months_in_range(window: DateRange) -> tuple[MonthId, ...]:

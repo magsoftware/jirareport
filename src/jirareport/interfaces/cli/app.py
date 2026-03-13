@@ -7,18 +7,19 @@ from datetime import date
 from loguru import logger
 
 from jirareport.application.services import (
+    BackfillService,
     DailySnapshotService,
     MonthlyReportService,
     SheetsSyncService,
 )
-from jirareport.domain.models import JiraSpace, MonthId
+from jirareport.domain.models import DateRange, JiraSpace, MonthId
 from jirareport.domain.ports import (
     ReportStorage,
     SpreadsheetPublisher,
     SpreadsheetResolver,
     WorklogSource,
 )
-from jirareport.domain.time_range import current_date
+from jirareport.domain.time_range import current_date, explicit_range
 from jirareport.infrastructure.config import AppSettings, load_settings
 from jirareport.infrastructure.google.sheets_client import (
     GoogleSheetsPublisher,
@@ -39,6 +40,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "daily":
             storage = _build_storage(settings)
             return _run_daily(args.date, args.space, settings, storage)
+        if args.command == "backfill":
+            storage = _build_storage(settings)
+            return _run_backfill(
+                args.from_date,
+                args.to_date,
+                args.space,
+                settings,
+                storage,
+            )
         if args.command == "monthly":
             storage = _build_storage(settings)
             return _run_monthly(args.month, args.space, settings, storage)
@@ -60,6 +70,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  jirareport daily\n"
             "  jirareport daily --date 2026-03-11\n"
+            "  jirareport backfill --from 2025-01-01 --to 2025-12-31\n"
             "  jirareport monthly\n"
             "  jirareport monthly --month 2026-03\n"
             "  jirareport sync sheets\n"
@@ -76,7 +87,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="command",
         required=True,
         title="commands",
-        metavar="{daily,monthly,sync}",
+        metavar="{daily,backfill,monthly,sync}",
     )
     daily = subparsers.add_parser(
         "daily",
@@ -95,6 +106,33 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     daily.add_argument(
+        "--space",
+        type=str,
+        help="Optional Jira space key or slug. Defaults to all configured spaces.",
+    )
+    backfill = subparsers.add_parser(
+        "backfill",
+        help="Generate monthly reports for an explicit historical date range.",
+        description=(
+            "Fetch worklogs for the requested date range and rebuild every "
+            "monthly report touched by that range."
+        ),
+    )
+    backfill.add_argument(
+        "--from",
+        dest="from_date",
+        required=True,
+        type=str,
+        help="Inclusive range start in YYYY-MM-DD format.",
+    )
+    backfill.add_argument(
+        "--to",
+        dest="to_date",
+        required=True,
+        type=str,
+        help="Inclusive range end in YYYY-MM-DD format.",
+    )
+    backfill.add_argument(
         "--space",
         type=str,
         help="Optional Jira space key or slug. Defaults to all configured spaces.",
@@ -231,6 +269,38 @@ def _run_daily(
     return 0
 
 
+def _run_backfill(
+    input_from: str,
+    input_to: str,
+    space_selector: str | None,
+    settings: AppSettings,
+    storage: ReportStorage,
+) -> int:
+    """Runs the historical backfill use case for an explicit range."""
+    window = _explicit_window(input_from, input_to)
+    for space in _selected_spaces(settings, space_selector):
+        source = _build_source(settings, space)
+        service = BackfillService(
+            source=source,
+            storage=storage,
+            space=space,
+            timezone_name=settings.timezone_name,
+        )
+        result = service.generate(window)
+        logger.info(
+            (
+                "Historical backfill for {} produced {} "
+                "monthly report(s) from {} worklogs."
+            ),
+            space.slug,
+            result.month_count,
+            result.worklog_count,
+        )
+    logger.info("Completed historical backfill command.")
+    flush_logging()
+    return 0
+
+
 def _run_monthly(
     input_month: str | None,
     space_selector: str | None,
@@ -291,6 +361,14 @@ def _run_sync_sheets(
     logger.info("Completed Google Sheets sync command.")
     flush_logging()
     return 0
+
+
+def _explicit_window(input_from: str, input_to: str) -> DateRange:
+    """Parses an explicit inclusive date range from CLI arguments."""
+    return explicit_range(
+        start=date.fromisoformat(input_from),
+        end=date.fromisoformat(input_to),
+    )
 
 
 def _selected_spaces(

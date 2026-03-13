@@ -51,6 +51,15 @@ class MonthlyReportResult:
 
 
 @dataclass(frozen=True)
+class BackfillResult:
+    """Describes the output of the historical backfill use case."""
+
+    monthly_paths: tuple[str, ...]
+    worklog_count: int
+    month_count: int
+
+
+@dataclass(frozen=True)
 class SpreadsheetSyncResult:
     """Describes the output of the Google Sheets synchronization use case."""
 
@@ -168,6 +177,59 @@ class MonthlyReportService:
         )
         ticket_count = len(report.tickets)
         return MonthlyReportResult(report_path, ticket_count, len(worklogs))
+
+
+class BackfillService:
+    """Builds monthly reports for an explicit historical date range."""
+
+    def __init__(
+        self,
+        source: WorklogSource,
+        storage: ReportStorage,
+        space: JiraSpace,
+        timezone_name: str,
+    ) -> None:
+        """Initializes the service with its reporting dependencies."""
+        self._source = source
+        self._storage = storage
+        self._space = space
+        self._timezone = ZoneInfo(timezone_name)
+        self._timezone_name = timezone_name
+
+    def generate(self, window: DateRange) -> BackfillResult:
+        """Generates monthly reports for every month touched by the range."""
+        generated_at = datetime.now(self._timezone)
+        worklogs = _sort_worklogs(self._source.fetch_worklogs(window))
+        logger.info(
+            "Starting historical backfill for space {} in range {} to {}.",
+            self._space.slug,
+            window.start.isoformat(),
+            window.end.isoformat(),
+        )
+        monthly_paths: list[str] = []
+        for month in months_in_range(window):
+            report = _build_monthly_report(
+                worklogs,
+                self._space,
+                month,
+                generated_at,
+                self._timezone_name,
+            )
+            path = self._storage.write_json(
+                _monthly_report_path(self._space, month),
+                serialize_monthly_report(report),
+            )
+            monthly_paths.append(path)
+        logger.info(
+            (
+                "Completed historical backfill for space {} "
+                "with {} worklogs across {} month(s)."
+            ),
+            self._space.slug,
+            len(worklogs),
+            len(monthly_paths),
+        )
+        return BackfillResult(tuple(monthly_paths), len(worklogs), len(monthly_paths))
 
 
 class SheetsSyncService:

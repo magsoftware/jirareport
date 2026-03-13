@@ -5,6 +5,7 @@ from datetime import date
 from typing import Any
 
 from jirareport.application.services import (
+    BackfillService,
     DailySnapshotService,
     MonthlyReportService,
     SheetsSyncService,
@@ -122,6 +123,42 @@ def test_daily_snapshot_generates_raw_and_monthly_reports(
     assert march_payload["tickets"][0]["bookings"][0]["crosses_midnight"] is False
 
 
+def test_daily_snapshot_closes_previous_two_months_on_first_day_of_month(
+    make_worklog: Callable[..., WorklogEntry],
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    worklogs = [
+        make_worklog(
+            "1",
+            "PRJ-1",
+            "February work",
+            "Alice",
+            "2026-02-20T09:00:00+01:00",
+            3600,
+        ),
+        make_worklog(
+            "2",
+            "PRJ-2",
+            "March work",
+            "Bob",
+            "2026-03-20T09:00:00+01:00",
+            3600,
+        ),
+    ]
+    source = FakeWorklogSource(worklogs)
+    storage = FakeStorage()
+    space = make_space(key="PRJ", name="Project", slug="project")
+    service = DailySnapshotService(source, storage, space, "Europe/Warsaw")
+
+    result = service.generate(date(2026, 4, 1))
+
+    assert source.windows == [DateRange(start=date(2026, 2, 1), end=date(2026, 3, 31))]
+    assert result.monthly_paths == (
+        "spaces/PRJ/project/derived/monthly/2026/2026-02.json",
+        "spaces/PRJ/project/derived/monthly/2026/2026-03.json",
+    )
+
+
 def test_monthly_report_filters_to_requested_month(
     make_worklog: Callable[..., WorklogEntry],
     make_space: Callable[..., JiraSpace],
@@ -157,6 +194,44 @@ def test_monthly_report_filters_to_requested_month(
     assert payload["month"] == "2026-03"
     assert len(payload["tickets"]) == 1
     assert payload["tickets"][0]["bookings"][0]["duration_hours"] == 2.0
+
+
+def test_backfill_generates_monthly_reports_for_explicit_range(
+    make_worklog: Callable[..., WorklogEntry],
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    worklogs = [
+        make_worklog(
+            "1",
+            "PRJ-1",
+            "January work",
+            "Alice",
+            "2025-01-15T09:00:00+01:00",
+            3600,
+        ),
+        make_worklog(
+            "2",
+            "PRJ-2",
+            "February work",
+            "Bob",
+            "2025-02-03T09:00:00+01:00",
+            7200,
+        ),
+    ]
+    source = FakeWorklogSource(worklogs)
+    storage = FakeStorage()
+    space = make_space(key="PRJ", name="Project", slug="project")
+    service = BackfillService(source, storage, space, "Europe/Warsaw")
+
+    result = service.generate(DateRange(start=date(2025, 1, 1), end=date(2025, 2, 28)))
+
+    assert result.month_count == 2
+    assert result.worklog_count == 2
+    assert source.windows == [DateRange(start=date(2025, 1, 1), end=date(2025, 2, 28))]
+    assert result.monthly_paths == (
+        "spaces/PRJ/project/derived/monthly/2025/2025-01.json",
+        "spaces/PRJ/project/derived/monthly/2025/2025-02.json",
+    )
 
 
 def test_sync_sheets_builds_yearly_tabs_from_current_snapshot(

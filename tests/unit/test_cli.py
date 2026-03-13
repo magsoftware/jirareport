@@ -8,7 +8,7 @@ from typing import cast
 
 import pytest
 
-from jirareport.domain.models import JiraSpace, MonthId
+from jirareport.domain.models import DateRange, JiraSpace, MonthId
 from jirareport.domain.ports import ReportStorage, SpreadsheetPublisher
 from jirareport.infrastructure.config import (
     AppSettings,
@@ -28,6 +28,13 @@ class DailyResult:
 @dataclass(frozen=True)
 class MonthlyResult:
     report_path: str
+
+
+@dataclass(frozen=True)
+class BackfillResult:
+    monthly_paths: tuple[str, ...]
+    worklog_count: int
+    month_count: int
 
 
 @dataclass(frozen=True)
@@ -59,6 +66,23 @@ class FakeMonthlyService:
     def generate(self, month: MonthId) -> MonthlyResult:
         self.last_month = month
         return MonthlyResult(report_path="derived/monthly.json")
+
+
+@dataclass
+class FakeBackfillService:
+    source: object
+    storage: object
+    space: JiraSpace
+    timezone_name: str
+    last_window: object | None = None
+
+    def generate(self, window: object) -> BackfillResult:
+        self.last_window = window
+        return BackfillResult(
+            monthly_paths=("derived/2025-01.json", "derived/2025-02.json"),
+            worklog_count=10,
+            month_count=2,
+        )
 
 
 @dataclass
@@ -118,6 +142,31 @@ def test_main_dispatches_monthly_command(
     assert result == 0
     assert fake_monthly.last_month is not None
     assert fake_monthly.last_month.label() == "2026-03"
+
+
+def test_main_dispatches_backfill_command(
+    monkeypatch: pytest.MonkeyPatch,
+    make_space: Callable[..., JiraSpace],
+) -> None:
+    settings = _settings(make_space())
+    fake_backfill = FakeBackfillService(None, None, settings.spaces[0], "Europe/Warsaw")
+    monkeypatch.setattr(app, "load_settings", lambda: settings)
+    monkeypatch.setattr(app, "configure_logging", lambda debug: None)
+    monkeypatch.setattr(app, "flush_logging", lambda: None)
+    monkeypatch.setattr(app, "_build_source", lambda settings, space: object())
+    monkeypatch.setattr(app, "_build_storage", lambda settings: object())
+    monkeypatch.setattr(
+        app,
+        "BackfillService",
+        lambda *args, **kwargs: fake_backfill,
+    )
+
+    result = app.main(
+        ["backfill", "--from", "2025-01-01", "--to", "2025-12-31", "--space", "project"]
+    )
+
+    assert result == 0
+    assert fake_backfill.last_window == app._explicit_window("2025-01-01", "2025-12-31")
 
 
 def test_main_dispatches_sync_sheets_command(
@@ -261,6 +310,13 @@ def test_run_daily_and_monthly_use_current_date_when_input_missing(
     assert fake_daily.last_date == date(2026, 3, 12)
     assert fake_monthly.last_month is not None
     assert fake_monthly.last_month.label() == "2026-03"
+
+
+def test_explicit_window_parses_cli_range() -> None:
+    assert app._explicit_window("2025-01-01", "2025-12-31") == DateRange(
+        start=date(2025, 1, 1),
+        end=date(2025, 12, 31),
+    )
 
 
 def test_run_sync_sheets_uses_current_date_when_input_missing(
