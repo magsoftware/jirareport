@@ -50,11 +50,15 @@ target-version = "py313"
 [tool.ruff.lint]
 select = [
     "B",
+    "C90",
     "E",
     "F",
     "I",
     "UP",
 ]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 [tool.mypy]
 python_version = "3.13"
