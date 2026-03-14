@@ -297,9 +297,8 @@ def _validate_unique_attribute(
 def _sheets_enabled_from_env(configured_spaces: tuple[ConfiguredSpace, ...]) -> bool:
     """Determines whether Google Sheets publishing is enabled."""
     raw_value = os.getenv("GOOGLE_SHEETS_ENABLED")
-    if raw_value in {None, ""}:
+    if raw_value is None or raw_value == "":
         return any(configured_space.google_sheets_ids for configured_space in configured_spaces)
-    assert raw_value is not None
     normalized = raw_value.lower().strip()
     if normalized in {"1", "true", "yes", "on"}:
         return True
@@ -311,9 +310,8 @@ def _sheets_enabled_from_env(configured_spaces: tuple[ConfiguredSpace, ...]) -> 
 def _bigquery_enabled_from_env() -> bool:
     """Determines whether BigQuery reporting is enabled."""
     raw_value = os.getenv("BIGQUERY_ENABLED")
-    if raw_value in {None, ""}:
+    if raw_value is None or raw_value == "":
         return bool(os.getenv("BIGQUERY_PROJECT_ID") and os.getenv("BIGQUERY_DATASET"))
-    assert raw_value is not None
     normalized = raw_value.lower().strip()
     if normalized in {"1", "true", "yes", "on"}:
         return True

@@ -679,7 +679,8 @@ def _run_sync_sheets(
         )
 
         if explicit_window is None:
-            assert reference_date is not None
+            if reference_date is None:
+                raise ValueError("reference_date must not be None when no explicit window is provided")
             result = service.generate(reference_date)
         else:
             result = service.generate_range(explicit_window)
@@ -737,7 +738,8 @@ def _run_sync_bigquery(
         )
 
         if explicit_window is None:
-            assert reference_date is not None
+            if reference_date is None:
+                raise ValueError("reference_date must not be None when no explicit window is provided")
             result = service.generate(reference_date)
         else:
             result = service.generate_range(explicit_window)

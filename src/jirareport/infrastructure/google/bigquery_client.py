@@ -61,6 +61,9 @@ class BigQueryClientProtocol(Protocol):
 
 
 BigQueryClientFactory = Callable[[], BigQueryClientProtocol]
+# NOTE: this schema must stay in sync with MONTHLY_WORKLOG_SCHEMA in
+# application/parquet_serializers.py — any field additions must be reflected
+# in both places.
 WORKLOGS_SCHEMA = (
     bigquery.SchemaField("space_key", "STRING"),
     bigquery.SchemaField("space_name", "STRING"),
@@ -397,9 +400,21 @@ def _team_daily_query(table_ref: str, space_slug: str | None = None) -> str:
 
 
 def _space_filter_clause(space_slug: str | None) -> str:
-    """Returns an optional SQL filter clause for one reporting space."""
+    """Returns an optional SQL filter clause for one reporting space.
+
+    Args:
+        space_slug: Optional space slug used to narrow the filter.
+
+    Returns:
+        A WHERE clause string, or an empty string when no slug is given.
+
+    Raises:
+        ValueError: If the slug contains characters that are unsafe for inline SQL.
+    """
     if space_slug is None:
         return ""
+    if not re.match(r"^[a-zA-Z0-9_-]+$", space_slug):
+        raise ValueError(f"Unsafe space slug for SQL filter: {space_slug!r}")
     return f"WHERE space_slug = '{space_slug}' "
 
 

@@ -18,6 +18,7 @@ from jirareport.application.spreadsheets import (
     build_spreadsheet_request,
     years_for_snapshot,
 )
+from jirareport.application.utils import filter_worklogs_for_month
 from jirareport.domain.models import (
     DailyRawSnapshot,
     DateRange,
@@ -89,6 +90,15 @@ class BigQuerySyncResult:
     worklog_count: int
 
 
+@dataclass(frozen=True)
+class _MonthlyWriteResult:
+    """Groups together the outputs of _write_monthly_reports."""
+
+    report_paths: tuple[str, ...]
+    curated_paths: tuple[str, ...]
+    reports: tuple[MonthlyWorklogReport, ...]
+
+
 class DailySnapshotService:
     """Implements the main daily reporting use case.
 
@@ -140,7 +150,7 @@ class DailySnapshotService:
             _daily_snapshot_path(self._space, reference_date),
             serialize_daily_snapshot(snapshot),
         )
-        monthly_paths, curated_paths, _ = _write_monthly_reports(
+        monthly_result = _write_monthly_reports(
             report_storage=self._report_storage,
             dataset_storage=self._dataset_storage,
             space=self._space,
@@ -154,12 +164,12 @@ class DailySnapshotService:
             "Generated snapshot for space {} with {} worklogs across {} month(s).",
             self._space.slug,
             len(worklogs),
-            len(monthly_paths),
+            len(monthly_result.report_paths),
         )
         return DailySnapshotResult(
             snapshot_path,
-            monthly_paths,
-            curated_paths,
+            monthly_result.report_paths,
+            monthly_result.curated_paths,
             len(worklogs),
         )
 
@@ -196,7 +206,7 @@ class MonthlyReportService:
         generated_at = datetime.now(self._timezone)
         worklogs = _fetch_sorted_worklogs(self._source, window)
 
-        report_paths, curated_paths, reports = _write_monthly_reports(
+        monthly_result = _write_monthly_reports(
             report_storage=self._report_storage,
             dataset_storage=self._dataset_storage,
             space=self._space,
@@ -206,12 +216,12 @@ class MonthlyReportService:
             timezone_name=self._timezone_name,
         )
 
-        report = reports[0]
+        report = monthly_result.reports[0]
         ticket_count = len(report.tickets)
 
         return MonthlyReportResult(
-            report_paths[0],
-            curated_paths[0],
+            monthly_result.report_paths[0],
+            monthly_result.curated_paths[0],
             ticket_count,
             len(worklogs),
         )
@@ -254,7 +264,7 @@ class BackfillService:
             window.start.isoformat(),
             window.end.isoformat(),
         )
-        monthly_paths, curated_paths, _ = _write_monthly_reports(
+        monthly_result = _write_monthly_reports(
             report_storage=self._report_storage,
             dataset_storage=self._dataset_storage,
             space=self._space,
@@ -268,13 +278,13 @@ class BackfillService:
             ("Completed historical backfill for space {} with {} worklogs across {} month(s)."),
             self._space.slug,
             len(worklogs),
-            len(monthly_paths),
+            len(monthly_result.report_paths),
         )
         return BackfillResult(
-            tuple(monthly_paths),
-            tuple(curated_paths),
+            monthly_result.report_paths,
+            monthly_result.curated_paths,
             len(worklogs),
-            len(monthly_paths),
+            len(monthly_result.report_paths),
         )
 
 
@@ -372,13 +382,21 @@ class SheetsSyncService:
     ) -> None:
         """Logs the beginning of a Sheets synchronization run."""
         if explicit_range:
-            logger.info(
-                "Starting Google Sheets range sync for space {} in range {} to {}.",
-                self._space.slug,
-                window.start.isoformat(),
-                window.end.isoformat(),
-            )
-            return
+            self._log_range_sync_start(window)
+        else:
+            self._log_rolling_sync_start(snapshot_date)
+
+    def _log_range_sync_start(self, window: DateRange) -> None:
+        """Logs the beginning of an explicit-range Sheets synchronization run."""
+        logger.info(
+            "Starting Google Sheets range sync for space {} in range {} to {}.",
+            self._space.slug,
+            window.start.isoformat(),
+            window.end.isoformat(),
+        )
+
+    def _log_rolling_sync_start(self, snapshot_date: date) -> None:
+        """Logs the beginning of a rolling Sheets synchronization run."""
         logger.info(
             "Starting Google Sheets sync for space {} and reference date {}.",
             self._space.slug,
@@ -393,17 +411,25 @@ class SheetsSyncService:
     ) -> None:
         """Logs the end of a Sheets synchronization run."""
         if explicit_range:
-            logger.info(
-                ("Published {} worklogs to {} spreadsheet(s) for explicit range in space {}."),
-                worklog_count,
-                spreadsheet_count,
-                self._space.slug,
-            )
-            logger.info(
-                "Completed Google Sheets range sync for space {}.",
-                self._space.slug,
-            )
-            return
+            self._log_range_sync_completion(worklog_count, spreadsheet_count)
+        else:
+            self._log_rolling_sync_completion(worklog_count, spreadsheet_count)
+
+    def _log_range_sync_completion(self, worklog_count: int, spreadsheet_count: int) -> None:
+        """Logs the completion of an explicit-range Sheets synchronization run."""
+        logger.info(
+            ("Published {} worklogs to {} spreadsheet(s) for explicit range in space {}."),
+            worklog_count,
+            spreadsheet_count,
+            self._space.slug,
+        )
+        logger.info(
+            "Completed Google Sheets range sync for space {}.",
+            self._space.slug,
+        )
+
+    def _log_rolling_sync_completion(self, worklog_count: int, spreadsheet_count: int) -> None:
+        """Logs the completion of a rolling Sheets synchronization run."""
         logger.info(
             "Published {} worklogs to {} spreadsheet(s) for space {}.",
             worklog_count,
@@ -613,7 +639,7 @@ def _write_monthly_reports(
     worklogs: list[WorklogEntry],
     generated_at: datetime,
     timezone_name: str,
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[MonthlyWorklogReport, ...]]:
+) -> _MonthlyWriteResult:
     """Writes derived monthly reports and curated datasets for requested months.
 
     Args:
@@ -626,7 +652,7 @@ def _write_monthly_reports(
         timezone_name: Reporting timezone name stored in written payloads.
 
     Returns:
-        Tuple of JSON paths, curated dataset paths, and in-memory report objects.
+        Named result grouping JSON paths, curated dataset paths, and in-memory report objects.
     """
     report_paths: list[str] = []
     curated_paths: list[str] = []
@@ -646,7 +672,11 @@ def _write_monthly_reports(
         curated_paths.append(curated_path)
         reports.append(report)
 
-    return tuple(report_paths), tuple(curated_paths), tuple(reports)
+    return _MonthlyWriteResult(
+        report_paths=tuple(report_paths),
+        curated_paths=tuple(curated_paths),
+        reports=tuple(reports),
+    )
 
 
 def _write_monthly_report(
@@ -699,7 +729,7 @@ def _worklogs_for_month(
     month: MonthId,
 ) -> list[WorklogEntry]:
     """Returns only worklogs whose local start date belongs to the month."""
-    return [entry for entry in worklogs if month.contains(entry.started_at.date())]
+    return filter_worklogs_for_month(worklogs, month)
 
 
 def _daily_snapshot_path(space: JiraSpace, reference_date: date) -> str:

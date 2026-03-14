@@ -83,6 +83,11 @@ class SheetsServiceProtocol(Protocol):
 
 SheetsServiceFactory = Callable[[], SheetsServiceProtocol]
 HEADER_COLOR = {"red": 0.87, "green": 0.92, "blue": 0.98}
+# Column indices within the monthly raw worksheet (0-based).
+_COL_DURATION_SECONDS = 16
+_COL_DURATION_HOURS = 17
+# Sentinel used to extend number-format requests through all data rows.
+_MAX_DATA_ROWS = 100_000
 
 
 class GoogleSheetsPublisher:
@@ -401,8 +406,12 @@ def _number_format_requests(
         return []
     requests: list[dict[str, object]] = []
     if _is_monthly_raw_worksheet(worksheet.title):
-        requests.append(_column_number_format_request(sheet_id, 16, 17, "NUMBER", "0"))
-        requests.append(_column_number_format_request(sheet_id, 17, 18, "NUMBER", "0.00"))
+        requests.append(
+            _column_number_format_request(sheet_id, _COL_DURATION_SECONDS, _COL_DURATION_SECONDS + 1, "NUMBER", "0")
+        )
+        requests.append(
+            _column_number_format_request(sheet_id, _COL_DURATION_HOURS, _COL_DURATION_HOURS + 1, "NUMBER", "0.00")
+        )
     return requests
 
 
@@ -419,7 +428,7 @@ def _column_number_format_request(
         "startRowIndex": 1,
         "startColumnIndex": start_column_index,
         "endColumnIndex": end_column_index,
-        "endRowIndex": 99999,
+        "endRowIndex": _MAX_DATA_ROWS,
     }
     return {
         "repeatCell": {

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
-
+from jirareport.application.utils import format_datetime
 from jirareport.domain.models import (
     DailyRawSnapshot,
     JiraSpace,
@@ -31,8 +30,8 @@ def serialize_worklog(
         "issue_type": entry.issue_type,
         "author": entry.author_name,
         "author_account_id": entry.author_account_id,
-        "started_at": _format_datetime(entry.started_at),
-        "ended_at": _format_datetime(entry.ended_at),
+        "started_at": format_datetime(entry.started_at),
+        "ended_at": format_datetime(entry.ended_at),
         "started_date": entry.started_date.isoformat(),
         "ended_date": entry.ended_date.isoformat(),
         "crosses_midnight": entry.crosses_midnight,
@@ -64,7 +63,7 @@ def serialize_daily_snapshot(snapshot: DailyRawSnapshot) -> JsonObject:
         "snapshot_date": snapshot_date,
         "window_start": snapshot.window.start.isoformat(),
         "window_end": snapshot.window.end.isoformat(),
-        "generated_at": _format_datetime(snapshot.generated_at),
+        "generated_at": format_datetime(snapshot.generated_at),
         "timezone": snapshot.timezone_name,
         "worklogs": worklogs,
     }
@@ -79,24 +78,23 @@ def serialize_monthly_report(report: MonthlyWorklogReport) -> JsonObject:
     Returns:
         A JSON-serializable dictionary for the monthly report.
     """
-    tickets: list[JsonValue] = []
-    for ticket in report.tickets:
-        tickets.append(
-            {
-                "issue_key": ticket.issue_key,
-                "summary": ticket.summary,
-                "issue_type": ticket.issue_type,
-                "total_duration_hours": ticket.total_duration_hours,
-                "bookings": [serialize_worklog(entry) for entry in ticket.bookings],
-            }
-        )
+    tickets: list[JsonValue] = [
+        {
+            "issue_key": ticket.issue_key,
+            "summary": ticket.summary,
+            "issue_type": ticket.issue_type,
+            "total_duration_hours": ticket.total_duration_hours,
+            "bookings": [serialize_worklog(entry) for entry in ticket.bookings],
+        }
+        for ticket in report.tickets
+    ]
 
     return {
         "report_type": "monthly_worklogs",
         "project_key": report.project_key,
         "space": serialize_space(report.space),
         "month": report.month.label(),
-        "generated_at": _format_datetime(report.generated_at),
+        "generated_at": format_datetime(report.generated_at),
         "timezone": report.timezone_name,
         "tickets": tickets,
     }
@@ -118,13 +116,4 @@ def serialize_space(space: JiraSpace) -> JsonObject:
     }
 
 
-def _format_datetime(value: datetime) -> str:
-    """Formats a datetime without fractional seconds for report output.
 
-    Args:
-        value: Datetime value emitted into report payloads.
-
-    Returns:
-        ISO 8601 datetime string truncated to whole seconds.
-    """
-    return value.isoformat(timespec="seconds")

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
 from io import BytesIO
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from jirareport.application.utils import format_datetime
 from jirareport.domain.models import JiraSpace, MonthId, WorklogEntry
 
 MONTHLY_WORKLOG_SCHEMA = pa.schema(
@@ -69,8 +69,8 @@ def _monthly_worklog_row(
         "issue_type": entry.issue_type,
         "author_name": entry.author_name,
         "author_account_id": entry.author_account_id,
-        "started_at": _format_datetime(entry.started_at),
-        "ended_at": _format_datetime(entry.ended_at),
+        "started_at": format_datetime(entry.started_at),
+        "ended_at": format_datetime(entry.ended_at),
         "started_date": entry.started_date,
         "ended_date": entry.ended_date,
         "crosses_midnight": entry.crosses_midnight,
@@ -79,6 +79,4 @@ def _monthly_worklog_row(
     }
 
 
-def _format_datetime(value: datetime) -> str:
-    """Formats datetime-like values without fractional seconds for Parquet export."""
-    return value.isoformat(timespec="seconds")
+

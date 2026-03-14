@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from jirareport.application.utils import filter_worklogs_for_month
 from jirareport.domain.models import (
     DailyRawSnapshot,
     MonthId,
@@ -104,7 +105,7 @@ def _worklogs_for_month(
     month: MonthId,
 ) -> list[WorklogEntry]:
     """Returns worklogs whose local start date belongs to the requested month."""
-    relevant = [entry for entry in worklogs if month.contains(entry.started_date)]
+    relevant = filter_worklogs_for_month(worklogs, month)
     return sorted(
         relevant,
         key=lambda item: (
