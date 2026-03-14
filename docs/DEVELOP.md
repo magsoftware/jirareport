@@ -1,56 +1,31 @@
-# DEVELOP - Developer Introduction
+# DEVELOP - Przewodnik dla developerow
 
 ## 1. Cel dokumentu
 
-Ten dokument wprowadza dewelopera w aktualny stan projektu `jirareport`.
+Ten dokument wprowadza developera w aktualny stan projektu `jirareport`.
 
-Opisuje:
-- strukture katalogow,
-- glowny przeplyw aplikacji,
-- modele domenowe,
-- use case'y i uslugi aplikacyjne,
-- adaptery infrastrukturalne,
-- wzorce projektowe i abstrakcje,
-- miejsca, w ktorych najlatwiej rozwijac system.
+Skupia sie na:
+- architekturze,
+- glownych przeplywach aplikacji,
+- modelach domenowych,
+- portach i adapterach,
+- konfiguracji,
+- miejscach, w ktorych najczesciej bedzie rozwijany system.
 
-To nie jest dokument produktowy. Wymagania biznesowe sa opisane w `docs/PRD.md`.
+Wymagania biznesowe sa opisane w `docs/PRD.md`.
 
-## 2. Czym jest ten projekt
+## 2. Co robi aplikacja
 
-`jirareport` to CLI do pobierania worklogow z Jira i budowania raportow JSON.
+`jirareport` to CLI do raportowania worklogow z Jira dla wielu skonfigurowanych spaces.
 
-Aktualnie system umie:
-- generowac dzienny raw snapshot,
-- generowac raport miesieczny,
-- zapisywac wynik lokalnie albo do Google Cloud Storage,
-- logowac przebieg przez `loguru`.
+Aktualne use-case'y:
+- `daily` - generuje raw snapshot i odswieza materializacje miesieczne,
+- `monthly` - przelicza jeden miesiac,
+- `backfill` - przelicza miesiace z jawnie wskazanego zakresu,
+- `sync sheets` - publikuje raw worklogi do rocznych spreadsheetow Google Sheets,
+- `sync bigquery` - laduje miesieczne datasety Parquet do BigQuery i odswieza widoki.
 
-Projekt publikuje dane rowniez do Google Sheets przez osobny use case i komende
-CLI `sync sheets`.
-
-## 3. Architektura wysokiego poziomu
-
-Projekt jest podzielony na lekkie warstwy:
-
-- `domain`
-- `application`
-- `infrastructure`
-- `interfaces`
-
-To jest w praktyce lekka odmiana:
-- `ports and adapters`
-- `hexagonal architecture`
-- `service layer`
-
-Zasada jest prosta:
-- `domain` nie zna szczegolow technicznych,
-- `application` sklada logike biznesowa z abstrakcji,
-- `infrastructure` implementuje integracje,
-- `interfaces` wystawia CLI.
-
-## 4. Struktura katalogow
-
-Aktualna struktura:
+## 3. Struktura projektu
 
 ```text
 src/jirareport/
@@ -61,897 +36,657 @@ src/jirareport/
   interfaces/cli/
   main.py
 
-tests/
-  integration/
-  unit/
-
 docs/
   PRD.md
   DEVELOP.md
   SHEETS_INTEGRATION.md
+  BUSINESS_OVERVIEW.md
+
+tests/
+  unit/
+  integration/
 ```
 
-### 4.1. `src/jirareport/domain`
+## 4. Architektura wysokiego poziomu
 
-Warstwa domenowa zawiera:
-- modele domenowe,
-- porty/protokoly,
-- logike operowania na zakresach dat.
+Projekt stosuje lekka architekture warstwowa typu ports-and-adapters.
 
-Pliki:
-- `models.py`
-- `ports.py`
-- `time_range.py`
+Zasady:
+- `domain` nie zna bibliotek zewnetrznych ani I/O,
+- `application` orkiestruje use-case'i i materializacje,
+- `infrastructure` implementuje integracje,
+- `interfaces` wystawia CLI i sklada zaleznosci.
 
-### 4.2. `src/jirareport/application`
+To nie jest ciezkie DDD. To pragmatyczny podzial odpowiedzialnosci.
 
-Warstwa aplikacyjna zawiera:
-- use case'y,
-- serwisy budujace raporty,
-- serializatory JSON,
-- budowe payloadow tabelarycznych dla Google Sheets.
+## 5. Warstwa domenowa
 
 Pliki:
-- `services.py`
-- `serializers.py`
-- `spreadsheets.py`
-
-### 4.3. `src/jirareport/infrastructure`
-
-Warstwa infrastrukturalna zawiera:
-- konfiguracje aplikacji,
-- klienta Jira,
-- storage lokalny i GCS,
-- adapter Google Sheets,
-- konfiguracje logowania.
-
-Pliki:
-- `config.py`
-- `jira_client.py`
-- `storage.py`
-- `logging_config.py`
-- `google/sheets_client.py`
-
-### 4.4. `src/jirareport/interfaces/cli`
-
-Warstwa interfejsu zawiera:
-- parser argumentow,
-- komendy CLI,
-- skladanie zaleznosci.
-
-Plik:
-- `app.py`
-
-### 4.5. `tests`
-
-Testy sa rozdzielone na:
-- `unit`
-- `integration`
-
-Testy integracyjne sa nadal lekkie:
-- nie ida do prawdziwej sieci,
-- testuja integracje z adapterem przy fake session.
-
-## 5. Główny przepływ aplikacji
-
-Punkt wejscia:
-- `src/jirareport/main.py`
-
-Entry point pakietu:
-- `jirareport = "jirareport.main:main"` w `pyproject.toml`
-
-Przeplyw wywolania:
-
-1. Uzytkownik uruchamia CLI.
-2. `interfaces/cli/app.py` parsuje argumenty.
-3. `load_settings()` buduje konfiguracje z `.env` i zmiennych srodowiskowych.
-4. `_build_source()` tworzy adapter Jira.
-5. `build_storage()` tworzy storage lokalny albo GCS.
-6. CLI opcjonalnie buduje tez publisher i resolver Google Sheets.
-7. CLI uruchamia odpowiedni use case:
-   - `DailySnapshotService`
-   - `MonthlyReportService`
-   - `SheetsSyncService`
-8. Use case pobiera worklogi przez port `WorklogSource`.
-9. Use case serializuje wynik do JSON albo buduje tabular payload dla Sheets.
-10. Use case zapisuje JSON przez port `ReportStorage` albo publikuje dane przez
-    `SpreadsheetPublisher`.
-11. CLI loguje rezultat i konczy proces.
-
-## 5A. Main Use Case
-
-Glowny use case projektu na dzis to:
-- codzienna generacja raw snapshotu worklogow,
-- oraz przebudowa raportow miesiecznych dla miesiecy dotknietych zakresem danych.
-
-Technicznie odpowiada za to:
-- `DailySnapshotService`
-
-Biznesowo ten use case rozwiazuje problem:
-- worklogi moga byc bukowane lub poprawiane wstecz,
-- dlatego raport miesieczny nie moze byc budowany tylko z "dzisiejszych zmian",
-- potrzebna jest codzienna rekalkulacja z ruchomego okna.
-
-Aktualny model dzialania:
-- job dzienny bierze zakres od pierwszego dnia poprzedniego miesiaca do wskazanej daty,
-- zapisuje raw snapshot jako stan "as of today",
-- przebudowuje wszystkie miesiace znajdujace sie w tym zakresie.
-
-Wazna konsekwencja:
-- po daily run powstaja nie tylko pliki `raw`,
-- powstaja tez pliki `derived/monthly` dla miesiecy objetych zakresem.
-
-Przyklad:
-- `daily --date 2026-03-11`
-- zakres: `2026-02-01 .. 2026-03-11`
-- wynik:
-  - `2026-02.json` zawiera worklogi przypisane do lutego,
-  - `2026-03.json` zawiera worklogi przypisane do marca do `2026-03-11` wlacznie.
-
-To znaczy, ze:
-- raport poprzedniego miesiaca moze byc pelny,
-- raport biezacego miesiaca jest raportem narastajacym do dnia uruchomienia.
-
-Z perspektywy storage:
-- `raw/daily` zachowuje historię uruchomien,
-- `derived/monthly` przechowuje aktualny, nadpisywany widok miesiaca.
-
-W praktyce to oznacza:
-- raw snapshot jest canonical source dla danego uruchomienia,
-- raport miesieczny jest widokiem pochodnym.
-
-Drugim use case'em jest:
-- `MonthlyReportService`
-
-Ten use case sluzy do:
-- wygenerowania jednego raportu miesiecznego na zadany miesiac,
-- np. dla re-run, odtworzenia albo lokalnej analizy.
-
-Trzecim use case'em jest:
-- `SheetsSyncService`
-
-Ten use case sluzy do:
-- zbudowania aktualnego snapshotu w pamieci,
-- podzialu danych na lata raportowe,
-- publikacji do Google Sheets w modelu `spreadsheet per year`,
-- tworzenia nowego spreadsheetu rocznego, jesli nie ma dla niego
-  skonfigurowanego ID.
-
-## 5B. End-to-End Processing Flow
-
-Ponizej opis pelnego flow przetwarzania danych od wejscia do wyniku.
-
-### Wejscie
-
-Uzytkownik albo workflow GitHub Actions uruchamia:
-- `jirareport daily`
-- albo `jirareport monthly`
-- albo `jirareport sync sheets`
-
-CLI przyjmuje opcjonalnie:
-- `--date` dla snapshotu dziennego,
-- `--month` dla raportu miesiecznego.
-
-### Krok 1. Parsowanie polecenia
-
-Warstwa:
-- `interfaces/cli/app.py`
-
-CLI:
-- parsuje argumenty,
-- ustala tryb pracy,
-- wlacza logowanie.
-
-### Krok 2. Zaladowanie konfiguracji
-
-Warstwa:
-- `infrastructure/config.py`
-
-System pobiera:
-- konfiguracje Jira,
-- konfiguracje storage,
-- strefe czasowa raportu.
-
-Na tym etapie surowe zmienne srodowiskowe sa mapowane do:
-- `AppSettings`
-- `JiraSettings`
-- `StorageSettings`
-
-### Krok 3. Zlozenie zaleznosci
-
-Warstwa:
-- `interfaces/cli/app.py`
-
-CLI buduje:
-- `JiraWorklogSource`
-- `LocalJsonStorage` albo `GcsJsonStorage`
-- `GoogleSheetsPublisher`
-- `GoogleSheetsResolver`
-
-To jest moment, w ktorym abstrakcje domenowe sa laczone z konkretnymi adapterami.
-
-### Krok 4. Uruchomienie use-case'u
-
-Jesli wybrano `daily`:
-- uruchamiany jest `DailySnapshotService.generate(reference_date)`
-
-Jesli wybrano `monthly`:
-- uruchamiany jest `MonthlyReportService.generate(month)`
-
-Jesli wybrano `sync sheets`:
-- uruchamiany jest `SheetsSyncService.generate(reference_date)`
-
-### Krok 5. Wyznaczenie zakresu danych
-
-Warstwa:
-- `domain/time_range.py`
-
-Use case oblicza:
-- `rolling_window(reference_date)` dla `daily`
-- `month_range(month)` dla `monthly`
-
-To jest krytyczny moment, bo determinuje:
-- jakie dane beda pobrane z Jira,
-- jakie miesiace beda przebudowane.
-
-### Krok 6. Pobranie danych z Jira
-
-Warstwa:
-- `infrastructure/jira_client.py`
-
-Adapter Jira:
-- buduje JQL dla worklogow,
-- pobiera liste issue z paginacja,
-- dla kazdego issue pobiera worklogi z paginacja,
-- mapuje payloady HTTP do `WorklogEntry`.
-
-Na tym etapie:
-- `started_at` jest konwertowane do strefy raportowej,
-- `ended_at` jest wyliczane,
-- wpisy sa filtrowane po lokalnej dacie.
-
-### Krok 7. Budowa modelu wewnetrznego
-
-Warstwa:
-- `application/services.py`
-
-Use case buduje:
-- `DailyRawSnapshot`
-- albo `MonthlyWorklogReport`
-
-Dla snapshotu dziennego dodatkowo:
-- wyznaczane sa wszystkie miesiace w zakresie,
-- dla kazdego miesiaca budowany jest osobny `MonthlyWorklogReport`.
-
-### Krok 8. Serializacja do JSON
-
-Warstwa:
-- `application/serializers.py`
-
-Modele domenowe sa zamieniane na payload JSON zgodny z kontraktem raportu.
-
-To jest osobny etap celowo oddzielony od:
-- pobierania danych,
-- obliczen domenowych,
-- zapisu do storage.
-
-### Krok 9. Zapis raportu
-
-Warstwa:
-- `infrastructure/storage.py`
-
-Payload JSON jest zapisywany przez port `ReportStorage` do:
-- lokalnego filesystemu,
-- albo GCS.
-
-Sciezki sa wyznaczane w use-case'ach:
-- `raw/daily/YYYY/MM/YYYY-MM-DD.json`
-- `derived/monthly/YYYY/YYYY-MM.json`
-
-W przypadku use-case'u dziennego zapis obejmuje:
-- jeden plik raw snapshot,
-- jeden lub wiecej plikow miesiecznych w `derived/monthly`.
-
-Liczba plikow w `derived/monthly` zalezy od tego, ile miesiecy przecina `rolling_window`.
-
-Wazna semantyka zapisu:
-- plik raw ma nazwe zalezną od `snapshot_date`, wiec kolejne uruchomienia tworza nowe pliki,
-- plik monthly ma nazwe zalezną tylko od `MonthId`, wiec kolejne uruchomienia nadpisuja ten sam plik dla danego miesiaca.
-
-Przyklad:
-- uruchomienie `daily --date 2026-03-11` tworzy:
-  - `raw/daily/2026/03/2026-03-11.json`
-  - `derived/monthly/2026/2026-02.json`
-  - `derived/monthly/2026/2026-03.json`
-
-- uruchomienie `daily --date 2026-03-12` tworzy:
-  - `raw/daily/2026/03/2026-03-12.json`
-  - nadpisuje `derived/monthly/2026/2026-02.json`
-  - nadpisuje `derived/monthly/2026/2026-03.json`
-
-### Krok 10. Wynik i logowanie
-
-Warstwa:
-- `interfaces/cli/app.py`
-- `infrastructure/logging_config.py`
-
-CLI:
-- loguje wynik,
-- zwraca kod wyjscia `0`,
-- konczy proces.
-
-### Podsumowanie flow
-
-W skrocie:
-
-1. CLI przyjmuje komende.
-2. Konfiguracja laduje ustawienia.
-3. CLI sklada adaptery.
-4. Use case wyznacza zakres dat.
-5. Adapter Jira pobiera i mapuje worklogi.
-6. Use case buduje modele raportowe.
-7. Serializer tworzy JSON.
-8. Storage zapisuje wynik.
-9. CLI loguje rezultat.
-
-## 6. Domain layer
-
-### 6.1. `MonthId`
-
-Plik:
 - `src/jirareport/domain/models.py`
+- `src/jirareport/domain/ports.py`
+- `src/jirareport/domain/time_range.py`
 
-To lekki identyfikator miesiaca:
-- `year`
-- `month`
+Glowne modele:
+- `MonthId` - identyfikator miesiaca, walidacja `YYYY-MM`, nawigacja po miesiacach,
+- `DateRange` - inkluzywny zakres dat,
+- `JiraSpace` - biznesowa przestrzen raportowa (`key`, `name`, `slug`),
+- `Issue` - minimalny model issue potrzebny do mapowania worklogow,
+- `WorklogEntry` - znormalizowany worklog po stronie domeny,
+- `DailyRawSnapshot` - snapshot raw dla konkretnego dnia i zakresu,
+- `TicketWorklogReport` - bookings zgrupowane pod ticketem,
+- `MonthlyWorklogReport` - raport miesieczny dla jednego `MonthId`,
+- `WorksheetData`, `SpreadsheetPublishRequest`, `SpreadsheetTarget` - modele publikacji do Sheets.
 
-Odpowiedzialnosci:
-- walidacja numeru miesiaca,
-- parsowanie `YYYY-MM`,
-- wyznaczanie poprzedniego i nastepnego miesiaca,
-- sprawdzanie, czy data nalezy do miesiaca.
+Wazne szczegoly `WorklogEntry`:
+- `ended_at` jest liczone w adapterze Jira jako `started_at + duration_seconds`,
+- `started_date` i `ended_date` sa pochodne od dat w lokalnej strefie raportowej,
+- `crosses_midnight` pozwala wykryc wpisy przechodzace przez granice dnia,
+- `duration_hours` jest zaokraglane do 2 miejsc.
 
-To jest celowy obiekt wartosci, zeby nie rozpraszac po kodzie:
-- surowych stringow `YYYY-MM`,
-- logiki przechodzenia miedzy miesiacami.
-
-### 6.2. `DateRange`
-
-Reprezentuje zakres dat:
-- `start`
-- `end`
-
-Odpowiedzialnosci:
-- walidacja `end >= start`,
-- sprawdzanie, czy data nalezy do zakresu.
-
-Jest uzywany jako wspolny kontrakt dla:
-- okna rekalkulacji,
-- pelnego miesiaca.
-
-### 6.3. `Issue`
-
-Minimalny model issue potrzebny do raportowania:
-- `key`
-- `summary`
-
-Nie modelujemy pelnego issue z Jiry, bo raport nie potrzebuje wiecej danych.
-
-### 6.4. `WorklogEntry`
-
-Najwazniejszy model domenowy.
-
-Zawiera:
-- `worklog_id`
-- `issue_key`
-- `issue_summary`
-- `author_name`
-- `author_account_id`
-- `started_at`
-- `ended_at`
-- `duration_seconds`
-
-Wazna decyzja:
-- `ended_at` jest zawsze wyliczane w adapterze na podstawie `started_at + duration_seconds`
-
-W modelu jest tez property:
-- `duration_hours`
-
-### 6.5. `DailyRawSnapshot`
-
-Model surowego snapshotu dziennego.
-
-Zawiera:
-- `project_key`
-- `snapshot_date`
-- `window`
-- `generated_at`
-- `timezone_name`
-- `worklogs`
-
-To jest stan danych "as of today", a nie raport tylko z jednego dnia.
-
-### 6.6. `TicketWorklogReport`
-
-Model agregujacy worklogi dla pojedynczego ticketu.
-
-Zawiera:
-- `issue_key`
-- `summary`
-- `bookings`
-
-Dodatkowo liczy:
-- `total_duration_hours`
-
-### 6.7. `MonthlyWorklogReport`
-
-Model raportu miesiecznego.
-
-Zawiera:
-- `project_key`
-- `month`
-- `generated_at`
-- `timezone_name`
-- `tickets`
-
-## 7. Domain ports i abstrakcje
+## 6. Porty domenowe
 
 Plik:
 - `src/jirareport/domain/ports.py`
 
-To jest kluczowy element architektury.
+Porty:
+- `WorklogSource`
+- `JsonReportStorage`
+- `CuratedDatasetStorage`
+- `SpreadsheetPublisher`
+- `SpreadsheetResolver`
+- `WorklogWarehouse`
 
-Zdefiniowane sa dwa protokoly:
+Znaczenie:
+- use-case nie wie, czy dane sa z Jira, z fake source albo innego backendu,
+- use-case nie wie, czy zapis idzie lokalnie czy do GCS,
+- use-case nie wie, czy publisherem jest Google Sheets czy inna implementacja,
+- use-case nie wie, czy warehouse to BigQuery czy testowy fake.
 
-### 7.1. `WorklogSource`
-
-Kontrakt:
-
-```python
-fetch_worklogs(window: DateRange) -> list[WorklogEntry]
-```
-
-Use case nie wie, czy dane pochodza z:
-- Jira API,
-- pliku,
-- fixture testowej,
-- innego systemu.
-
-Zna tylko ten interfejs.
-
-### 7.2. `ReportStorage`
-
-Kontrakt:
-
-```python
-write_json(path: str, payload: dict[str, Any]) -> str
-```
-
-Use case nie wie, czy zapis idzie do:
-- lokalnego filesystemu,
-- GCS,
-- innego docelowego storage.
-
-To jest podstawowy mechanizm separacji logiki od technologii.
-
-## 8. Logika zakresów dat
+## 7. Logika zakresow dat
 
 Plik:
 - `src/jirareport/domain/time_range.py`
 
-Tu siedzi logika datowa wspolna dla calego systemu.
+Najwazniejsze funkcje:
+- `current_date(timezone_name)`
+- `month_range(month)`
+- `rolling_window(reference_date)`
+- `active_months(reference_date)`
+- `explicit_range(start, end)`
+- `months_in_range(window)`
 
-### 8.1. `current_date(timezone_name)`
+Kluczowa regula:
+- standardowo `rolling_window` obejmuje poprzedni miesiac i biezacy miesiac do `reference_date`,
+- 1. dnia miesiaca okno cofa sie o dodatkowy miesiac i konczy na ostatnim dniu poprzedniego miesiaca.
 
-Zwraca lokalna date dla wskazanej strefy czasowej.
+Przyklady:
+- `2026-03-14` -> `2026-02-01 .. 2026-03-14`
+- `2026-04-01` -> `2026-02-01 .. 2026-03-31`
 
-To wazne, bo runner GitHub Actions dziala w UTC.
+Ta regula jest centralna dla logiki operacyjnej, testow i dokumentacji biznesowej.
 
-### 8.2. `month_range(month)`
+## 8. Warstwa aplikacyjna
 
-Buduje pelny zakres dat dla miesiaca.
-
-Przyklad:
-- `2026-03` -> `2026-03-01` do `2026-03-31`
-
-### 8.3. `rolling_window(reference_date)`
-
-Buduje ruchome okno rekalkulacji:
-- od pierwszego dnia poprzedniego miesiaca
-- do wskazanej daty
-
-Przyklad:
-- `2026-03-11` -> `2026-02-01 .. 2026-03-11`
-
-To jest celowa decyzja biznesowo-techniczna:
-- pozwala lapac opoznione bukowania i korekty.
-
-### 8.4. `months_in_range(window)`
-
-Zwraca wszystkie miesiace dotkniete danym zakresem.
-
-To pozwala use case'owi dziennemu przebudowac kilka raportow miesiecznych po jednym pobraniu raw data.
-
-## 9. Application layer
-
-### 9.1. Dlaczego istnieje osobna warstwa application
-
-To tutaj siedzi:
-- orkiestracja,
-- skladanie modeli,
-- decyzje o tym, co zapisac i pod jaka sciezka.
-
-Nie chcemy, aby taka logika siedziala:
-- w CLI,
-- w adapterze Jira,
-- w storage.
-
-### 9.2. `DailySnapshotService`
-
-Plik:
+Pliki:
 - `src/jirareport/application/services.py`
+- `src/jirareport/application/serializers.py`
+- `src/jirareport/application/parquet_serializers.py`
+- `src/jirareport/application/spreadsheets.py`
 
-To glowny use case dzienny.
+## 8.1. `DailySnapshotService`
+
+Glowny use-case operacyjny.
 
 Odpowiedzialnosci:
 - wyliczenie `rolling_window`,
-- pobranie worklogow przez `WorklogSource`,
-- utworzenie `DailyRawSnapshot`,
-- zapis raw snapshot,
-- przebudowa raportow miesiecznych dla miesiecy dotknietych oknem.
+- pobranie worklogow z `WorklogSource`,
+- zapis raw snapshot JSON,
+- przebudowa wszystkich raportow miesiecznych z okna,
+- wygenerowanie miesiecznych Parquetow.
 
-To najwazniejszy use case do uruchamiania codziennego joba.
+Artefakty:
+- `spaces/<key>/<slug>/raw/daily/YYYY/MM/YYYY-MM-DD.json`
+- `spaces/<key>/<slug>/derived/monthly/YYYY/YYYY-MM.json`
+- `curated/worklogs/space=<slug>/year=YYYY/month=MM/worklogs.parquet`
 
-Wynik zwracany jest przez:
-- `DailySnapshotResult`
+## 8.2. `MonthlyReportService`
 
-Zawiera on:
-- sciezke snapshotu,
-- sciezki raportow miesiecznych,
-- liczbe worklogow.
-
-### 9.3. `MonthlyReportService`
-
-Drugi glowny use case.
+Use-case ad hoc dla pojedynczego miesiaca.
 
 Odpowiedzialnosci:
-- wyliczenie pelnego miesiaca,
-- pobranie worklogow z tego zakresu,
-- zbudowanie `MonthlyWorklogReport`,
-- zapis raportu JSON.
+- wyliczenie pelnego zakresu miesiaca,
+- pobranie worklogow tylko z tego miesiaca,
+- zapis JSON i Parquet dla jednego `MonthId`.
 
-Wynik:
-- `MonthlyReportResult`
+## 8.3. `BackfillService`
 
-### 9.4. Funkcje pomocnicze w `services.py`
+Use-case historyczny.
 
-Najwazniejsze:
-- `_build_monthly_report()`
-- `_sorted_tickets()`
-- `_sort_worklogs()`
-- `_daily_snapshot_path()`
-- `_monthly_report_path()`
+Odpowiedzialnosci:
+- przyjecie jawnego `DateRange`,
+- pobranie worklogow dla calosci zakresu,
+- przebudowa wszystkich miesiecy przecietych zakresem,
+- brak tworzenia raw snapshotu dziennego.
 
-Te funkcje nie sa klasami celowo.
+## 8.4. `SheetsSyncService`
 
-To jest swiadoma decyzja:
-- logika jest stateless,
-- nie potrzebuje osobnych obiektow,
-- funkcje sa krotsze i czytelniejsze.
+Use-case publikacji do Google Sheets.
 
-## 10. Serializacja JSON
+Istotne cechy:
+- buduje snapshot w pamieci, nie korzysta z zapisanych plikow JSON,
+- przyjmuje albo `reference_date`, albo jawny `DateRange`,
+- rozdziela dane na lata,
+- dla kazdego roku buduje osobny `SpreadsheetPublishRequest`,
+- publikuje tylko miesieczne zakladki raw.
+
+Aktualny model Sheets:
+- spreadsheet per `space` per rok,
+- worksheet per miesiac o tytule `01`, `02`, ...,
+- zawartosc: surowe worklogi z headerem.
+
+## 8.5. `BigQuerySyncService`
+
+Use-case publikacji do BigQuery.
+
+Istotne cechy:
+- korzysta z juz zapisanych plikow Parquet,
+- operuje na miesiacach aktywnych albo wskazanych zakresem,
+- dla kazdego miesiaca laduje slice do tabeli,
+- po zaladowaniu odswieza zestaw widokow.
+
+## 8.6. Serializacja JSON
 
 Plik:
 - `src/jirareport/application/serializers.py`
 
-Ta warstwa odpowiada za mapowanie modeli domenowych do JSON payload.
+Kontrakty:
+- `serialize_daily_snapshot(snapshot)`
+- `serialize_monthly_report(report)`
+- `serialize_worklog(entry, snapshot_date=None)`
 
-Najwazniejsze funkcje:
-- `serialize_worklog()`
-- `serialize_daily_snapshot()`
-- `serialize_monthly_report()`
+JSON jest czytelny dla ludzi i trzymany jako artefakt raportowy / audytowy.
 
-Po co osobny serializer:
-- use case nie miesza logiki biznesowej z formatowaniem wyjscia,
-- latwiej zmienic kształt JSON bez ruszania pobierania danych,
-- latwiej dopisac kolejne formaty wyjsciowe.
+## 8.7. Serializacja Parquet
 
-## 11. Infrastructure layer
+Plik:
+- `src/jirareport/application/parquet_serializers.py`
 
-### 11.1. `config.py`
+Parquet jest wersja analityczna danych miesiecznych:
+- plaski model,
+- jawny schema,
+- kompresja `snappy`,
+- przygotowanie do BigQuery.
 
-Odpowiada za:
-- `load_dotenv()`
-- pobranie zmiennych srodowiskowych,
-- zbudowanie typowanej konfiguracji.
+## 8.8. Budowa payloadu dla Sheets
 
-Najwazniejsze modele konfiguracji:
+Plik:
+- `src/jirareport/application/spreadsheets.py`
+
+Najwazniejsze elementy:
+- `years_for_snapshot(snapshot)` zwraca wszystkie lata obecne w oknie,
+- `build_spreadsheet_request(snapshot, spreadsheet_id, year)` buduje payload dla jednego spreadsheetu rocznego,
+- tytuly worksheets to dwucyfrowe numery miesiecy.
+
+Uwaga:
+- obecne `SHEETS_INTEGRATION.md` musi byc interpretowane zgodnie z tym modulem,
+- nie ma tu agregatow `monthly_summary` ani `daily_summary`.
+
+## 9. Warstwa infrastrukturalna
+
+## 9.1. Konfiguracja
+
+Plik:
+- `src/jirareport/infrastructure/config.py`
+
+`load_settings()` sklada:
 - `JiraSettings`
 - `StorageSettings`
-- `AppSettings`
+- `SheetsSettings`
+- `BigQuerySettings`
+- `timezone_name`
+- `configured_spaces`
 
-Wazna decyzja:
-- konfiguracja jest od razu mapowana do dataclass,
-- reszta systemu nie pracuje na surowym `os.getenv`.
+`ConfiguredSpace` laczy:
+- domenowy `JiraSpace`,
+- opcjonalny `board_id`,
+- mapowanie `google_sheets_ids`.
 
-### 11.2. `jira_client.py`
+Walidowane sa m.in.:
+- wymagane zmienne Jira,
+- backend storage,
+- istnienie i schema `config/spaces.yaml`,
+- unikalnosc `key` i `slug`,
+- typy identyfikatorow arkuszy.
 
-To adapter implementujacy port `WorklogSource`.
+## 9.2. Jira adapter
 
-Klasa:
-- `JiraWorklogSource`
+Plik:
+- `src/jirareport/infrastructure/jira_client.py`
 
-Odpowiedzialnosci:
-- budowa JQL dla okna worklogow,
-- pobieranie issue z paginacja,
-- pobieranie worklogow dla issue z paginacja,
-- mapowanie payloadu HTTP do modeli domenowych,
-- konwersja czasu do wskazanej strefy czasowej,
-- retry dla requestow GET.
+Adapter:
+- buduje JQL `project = "<KEY>" AND worklogDate >= ... AND worklogDate <= ...`,
+- pobiera issues z paginacja,
+- dla kazdego issue pobiera worklogi z paginacja,
+- mapuje payload do `WorklogEntry`,
+- konwertuje `started_at` do strefy raportowej,
+- filtruje po lokalnej dacie `started_at.date()`.
 
-Wazne decyzje:
+To oznacza, ze przynaleznosc do dnia i miesiaca zawsze wynika z daty lokalnej po konwersji.
 
-1. Klient filtruje po `worklogDate` na poziomie JQL.
-2. Po stronie aplikacji i tak wykonywana jest lokalna filtracja po `started_at.date()`.
-3. `started_at` jest przeliczane do strefy raportowej.
-4. `ended_at` jest wyliczane lokalnie.
+## 9.3. Storage
 
-To jest istotne, bo granice dni i miesiecy sa liczone w `Europe/Warsaw`, a nie w surowym offsetcie z odpowiedzi Jira.
+Plik:
+- `src/jirareport/infrastructure/storage.py`
 
-### 11.3. `storage.py`
+Dostepne backendy:
+- `LocalJsonReportStorage`
+- `LocalCuratedDatasetStorage`
+- `GcsJsonReportStorage`
+- `GcsCuratedDatasetStorage`
 
-To adapter implementujacy port `ReportStorage`.
+Warstwa aplikacyjna widzi tylko porty.
 
-Implementacje:
-- `LocalJsonStorage`
-- `GcsJsonStorage`
+## 9.4. Google Sheets adapter
 
-Factory:
-- `build_storage()`
+Plik:
+- `src/jirareport/infrastructure/google/sheets_client.py`
 
-Wazne decyzje:
-- use case nie tworzy sam storage,
-- CLI sklada implementacje przez factory,
-- JSON jest zapisywany w jednej funkcji `_to_json()`,
-- backendi maja ten sam kontrakt `write_json()`.
+Elementy:
+- `GoogleSheetsPublisher`
+- `GoogleSheetsResolver`
 
-### 11.4. `logging_config.py`
+Zachowanie publish:
+- pobiera metadane spreadsheetu,
+- tworzy brakujace worksheets,
+- czysci cala zakladke,
+- zapisuje dane od `A1`,
+- naklada lekkie formatowanie i filtr.
 
-Centralna konfiguracja `loguru`.
+Zachowanie resolve:
+- najpierw probuje uzyc ID skonfigurowanego dla roku,
+- gdy go brakuje, tworzy nowy spreadsheet i loguje jego URL / ID.
 
-Odpowiada za:
-- usuniecie domyslnych sinkow,
-- ustawienie poziomu `INFO` lub `DEBUG`,
-- logowanie do stdout.
+## 9.5. BigQuery adapter
 
-To podejscie dobrze pasuje do lokalnego uruchamiania i do GitHub Actions.
+Plik:
+- `src/jirareport/infrastructure/google/bigquery_client.py`
 
-## 12. Interface layer
+Zachowanie:
+- tworzy tabele, jesli nie istnieja,
+- tabela jest partycjonowana po `started_date`,
+- tabela jest klastrowana po `space_slug`, `author_name`, `issue_key`,
+- przed zaladowaniem miesiaca usuwa aktualny slice,
+- po loadzie sprawdza duplikaty `worklog_id`,
+- utrzymuje widoki globalne i per space.
+
+## 10. CLI
 
 Plik:
 - `src/jirareport/interfaces/cli/app.py`
 
-To jest warstwa skladania aplikacji.
+Dostepne komendy:
 
-Odpowiedzialnosci:
-- zdefiniowanie parsera CLI,
-- zaladowanie konfiguracji,
-- zbudowanie adapterow,
-- uruchomienie odpowiedniego use case.
+```text
+jirareport daily [--date YYYY-MM-DD] [--space KEY_OR_SLUG]
+jirareport monthly [--month YYYY-MM] [--space KEY_OR_SLUG]
+jirareport backfill --from YYYY-MM-DD --to YYYY-MM-DD [--space KEY_OR_SLUG]
+jirareport sync sheets [--date YYYY-MM-DD | --from YYYY-MM-DD --to YYYY-MM-DD] [--space KEY_OR_SLUG]
+jirareport sync bigquery [--date YYYY-MM-DD | --from YYYY-MM-DD --to YYYY-MM-DD] [--space KEY_OR_SLUG]
+```
+
+Zasady:
+- `--space` filtruje po `key` lub `slug`,
+- brak `--space` oznacza uruchomienie dla wszystkich spaces z konfiguracji,
+- `sync` nie pozwala mieszac `--date` z `--from/--to`.
+
+## 11. End-to-end flow
+
+## 11.1. Flow `daily`
+
+1. CLI parsuje argumenty i laduje konfiguracje.
+2. Dla kazdego wybranego `space` buduje `JiraWorklogSource`, storage JSON i storage Parquet.
+3. `DailySnapshotService` wylicza `rolling_window`.
+4. Jira adapter pobiera issues i worklogi.
+5. Snapshot raw jest zapisywany do JSON.
+6. Wszystkie miesiace z okna sa materializowane do JSON i Parquet.
+7. CLI loguje wynik.
+
+## 11.2. Flow `monthly`
+
+1. CLI rozwiazuje `MonthId`.
+2. `MonthlyReportService` buduje `month_range`.
+3. System pobiera worklogi tylko z tego miesiaca.
+4. Powstaja dwa artefakty: JSON i Parquet.
+
+## 11.3. Flow `backfill`
+
+1. CLI buduje jawny `DateRange`.
+2. `BackfillService` pobiera dane dla calego zakresu.
+3. Wszystkie miesiace przeciete zakresem sa przeliczane.
+4. Nie jest tworzony daily raw snapshot.
+
+## 11.4. Flow `sync sheets`
+
+1. CLI rozwiazuje `reference_date` albo `DateRange`.
+2. `SheetsSyncService` buduje snapshot w pamieci.
+3. Snapshot jest dzielony na lata przez `years_for_snapshot`.
+4. `SpreadsheetResolver` znajduje lub tworzy spreadsheet roczny.
+5. `GoogleSheetsPublisher` publikuje worksheets miesieczne.
+
+## 11.5. Flow `sync bigquery`
+
+1. CLI ustala aktywne miesiace albo miesiace z zakresu.
+2. `BigQuerySyncService` czyta odpowiednie Parquety ze storage.
+3. Kazdy miesiac ladowany jest jako oddzielny slice.
+4. Na koncu odswiezane sa widoki raportowe.
+
+## 12. Artefakty w buckecie i na storage
+
+Ta sekcja opisuje dokladnie, jakie pliki powstaja na storage lokalnym albo w buckecie GCS.
+
+Z perspektywy use-case'ow nie ma roznicy, czy backendem jest filesystem czy GCS:
+- dla local pliki trafiaja pod `REPORT_OUTPUT_DIR`,
+- dla GCS obiekty trafiaja do `gs://<bucket>/<prefix>/...`
+
+## 12.1. Daily raw snapshot
+
+Komenda:
+- `jirareport daily`
+
+Tworzony jest jeden plik raw snapshot per `space` i per `reference_date`:
+- `spaces/<space_key>/<space_slug>/raw/daily/YYYY/MM/YYYY-MM-DD.json`
+
+Przyklad:
+- `spaces/LA004832/click-price/raw/daily/2026/03/2026-03-14.json`
+
+Semantyka:
+- to jest historyczny snapshot "co system widzial w dniu uruchomienia",
+- plik jest nowy dla kazdego dnia,
+- ten artefakt nie nadpisuje poprzednich dni.
+
+## 12.2. Derived monthly JSON
 
 Komendy:
-- `daily`
-- `monthly`
+- `jirareport daily`
+- `jirareport monthly`
+- `jirareport backfill`
 
-Najwazniejsze funkcje:
-- `main()`
-- `_build_parser()`
-- `_build_source()`
-- `_run_daily()`
-- `_run_monthly()`
+Tworzone lub nadpisywane sa raporty miesieczne JSON:
+- `spaces/<space_key>/<space_slug>/derived/monthly/YYYY/YYYY-MM.json`
 
-Wazna decyzja architektoniczna:
-- `_run_daily()` i `_run_monthly()` pracuja na portach `WorklogSource` i `ReportStorage`, a nie na konkretnych klasach.
+Przyklad:
+- `spaces/LA004832/click-price/derived/monthly/2026/2026-03.json`
 
-To ulatwia:
-- testy,
-- mockowanie,
-- wymiane adapterow.
+Semantyka:
+- to jest widok pochodny dla miesiaca,
+- kolejne przeliczenia tego samego miesiaca nadpisuja ten sam plik,
+- nie przechowujemy osobnej historii wersji miesiecy na poziomie nazwy pliku.
 
-## 13. Design patterns i decyzje projektowe
+## 12.3. Curated monthly Parquet
 
-### 13.1. Ports and Adapters
+Komendy:
+- `jirareport daily`
+- `jirareport monthly`
+- `jirareport backfill`
 
-Najwazniejszy wzorzec w projekcie.
+Tworzone lub nadpisywane sa miesieczne datasety Parquet:
+- `curated/worklogs/space=<space_slug>/year=YYYY/month=MM/worklogs.parquet`
 
-Porty:
-- `WorklogSource`
-- `ReportStorage`
+Przyklad:
+- `curated/worklogs/space=click-price/year=2026/month=03/worklogs.parquet`
 
-Adaptery:
-- `JiraWorklogSource`
-- `LocalJsonStorage`
-- `GcsJsonStorage`
+Semantyka:
+- to jest plaski dataset analityczny,
+- jest to glowny input dla `sync bigquery`,
+- kolejne przeliczenia tego samego miesiaca nadpisuja ten sam Parquet.
 
-Korzyść:
-- use case nie zalezy od technologii.
+## 12.4. Co nie jest zapisywane na storage przez `sync sheets`
 
-### 13.2. Service Layer / Use Case
+Komenda:
+- `jirareport sync sheets`
 
-Use case'y sa zaimplementowane jako klasy serwisowe:
-- `DailySnapshotService`
-- `MonthlyReportService`
+Ta komenda:
+- nie zapisuje nowych plikow JSON,
+- nie zapisuje nowych Parquetow,
+- nie czyta wprost zapisanych snapshotow JSON,
+- buduje snapshot w pamieci i publikuje go bezposrednio do Google Sheets.
 
-Korzyść:
-- jedna klasa = jedna odpowiedzialnosc operacyjna,
-- latwo testowac bez CLI i bez realnych integracji.
+## 12.5. Co czyta `sync bigquery`
 
-### 13.3. Factory
+Komenda:
+- `jirareport sync bigquery`
 
-Factory jest zastosowana w lekkiej formie:
-- `build_storage()`
-- `_build_source()`
+Ta komenda nie liczy worklogow od zera z Jira.
 
-Korzyść:
-- skladanie zaleznosci jest skupione w jednym miejscu.
+Ona:
+- czyta gotowe Parquety z `curated/worklogs/...`,
+- laduje je do BigQuery,
+- odswieza widoki.
 
-### 13.4. Value Objects
+To oznacza, ze przed `sync bigquery` odpowiednie miesiace musza juz byc wyliczone przez:
+- `daily`,
+- `monthly`,
+- albo `backfill`.
 
-`MonthId` i `DateRange` sa de facto prostymi value objects.
+## 13. Zasady przeliczania miesiecy
 
-Korzyść:
-- mniej surowych stringow i tuple dat,
-- mniej bledow na granicach miesiecy i zakresow.
+Ta sekcja opisuje, co dokladnie jest przeliczane przy kazdej komendzie.
 
-### 13.5. Serializer
+## 13.1. `daily`
 
-Serializacja JSON siedzi osobno od use case'ow.
+`daily`:
+- wylicza `rolling_window(reference_date)`,
+- pobiera worklogi z calego okna,
+- zapisuje jeden raw snapshot,
+- przelicza wszystkie miesiace przeciete przez to okno,
+- dla kazdego takiego miesiaca zapisuje JSON i Parquet.
 
-Korzyść:
-- oddzielenie modelu wewnetrznego od formatu wyjsciowego.
+Typowy przyklad:
+- `jirareport daily --date 2026-03-14`
+- okno: `2026-02-01 .. 2026-03-14`
+- przeliczane miesiace:
+  - `2026-02`
+  - `2026-03`
 
-## 14. Dlaczego nie ma tu ciezszego DDD
+Specjalny przypadek:
+- `jirareport daily --date 2026-04-01`
+- okno: `2026-02-01 .. 2026-03-31`
+- przeliczane miesiace:
+  - `2026-02`
+  - `2026-03`
 
-Projekt jest mały i celowo unika:
-- rozbudowanych agregatow,
-- repozytoriow domenowych,
-- event busow,
-- CQRS.
+To jest celowe:
+- run z 1. dnia miesiaca domyka poprzedni miesiac,
+- nie liczy jeszcze kwietnia.
 
-To bylby przerost formy nad trescia.
+## 13.2. `monthly`
 
-Obecny poziom abstrakcji jest wystarczajacy, bo:
-- use case'y sa proste,
-- integracje sa nieliczne,
-- domena jest relatywnie mala.
+`monthly`:
+- przelicza tylko jeden wskazany miesiac,
+- nie tworzy raw snapshotu dziennego,
+- zapisuje tylko:
+  - jeden derived monthly JSON,
+  - jeden curated monthly Parquet.
 
-## 15. Jak rozwijac projekt
+Przyklad:
+- `jirareport monthly --month 2026-03`
+- przeliczany miesiac:
+  - tylko `2026-03`
 
-### 15.1. Dodanie nowego storage
+## 13.3. `backfill`
 
-Jesli chcesz dodac nowy backend zapisu:
+`backfill`:
+- przyjmuje jawny zakres `--from` / `--to`,
+- pobiera worklogi dla calego zakresu,
+- przelicza wszystkie miesiace przeciete zakresem,
+- nie tworzy raw snapshotu dziennego.
 
-1. Zaimplementuj port `ReportStorage`.
-2. Dodaj implementacje w `infrastructure/storage.py` albo osobnym pliku.
-3. Rozszerz `build_storage()`.
-4. Dodaj testy adaptera.
+Przyklad:
+- `jirareport backfill --from 2025-12-15 --to 2026-02-10`
+- przeliczane miesiace:
+  - `2025-12`
+  - `2026-01`
+  - `2026-02`
 
-### 15.2. Dodanie nowego zrodla danych
+## 14. Kiedy aktualizowany jest Google Sheets
 
-Jesli chcesz pobierac worklogi z innego systemu:
+Google Sheets jest aktualizowany tylko przez:
+- `jirareport sync sheets`
 
-1. Zaimplementuj port `WorklogSource`.
-2. Zwroc `list[WorklogEntry]`.
-3. Podmien skladanie w CLI lub dodaj nowy tryb konfiguracji.
+Ani `daily`, ani `monthly`, ani `backfill` same z siebie nie publikuja do Sheets.
 
-### 15.3. Dodanie Google Sheets
+## 14.1. `sync sheets --date`
 
-Rekomendowane podejscie:
+Przy `--date`:
+- system liczy `rolling_window(reference_date)`,
+- pobiera worklogi z Jira,
+- buduje snapshot w pamieci,
+- rozdziela dane na lata i miesiace,
+- publikuje roczne spreadsheety i miesieczne zakladki raw.
 
-1. Dodaj nowy port, jesli publikacja ma byc osobnym use case'em.
-2. Dodaj adapter `GoogleSheetsPublisher` w `infrastructure`.
-3. Dodaj use case typu `PublishMonthlyReportToSheets`.
-4. Nie mieszaj publikacji do Sheets z adapterem Jira ani ze storage raw data.
+Przyklad:
+- `jirareport sync sheets --date 2026-03-14`
+- aktualizowany spreadsheet:
+  - `2026`
+- aktualizowane zakladki:
+  - `02`
+  - `03`
 
-Najlepiej zachowac ten podzial:
-- Jira = pobieranie
-- Storage = utrwalenie raw / derived data
-- Sheets = publikacja widoku raportowego
+Przyklad granicy roku:
+- `jirareport sync sheets --date 2026-01-05`
+- okno: `2025-12-01 .. 2026-01-05`
+- aktualizowane spreadsheety:
+  - `2025`
+  - `2026`
 
-### 15.4. Dodanie nowych formatow raportow
+## 14.2. `sync sheets --from --to`
 
-Jesli potrzebny bedzie:
-- JSONL,
-- CSV,
-- payload pod Sheets,
+Przy jawnym zakresie:
+- system nie uzywa `rolling_window`,
+- bierze dokladnie podany zakres,
+- aktualizuje wszystkie lata i miesiace obecne w tym zakresie.
 
-to najlepsze miejsce to:
-- osobny serializer,
-- ewentualnie osobny use case publikacji.
+To jest tryb do:
+- historycznego odtworzenia,
+- publikacji naprawczej,
+- diagnozy.
 
-## 16. Testy
+## 14.3. Co dokladnie jest aktualizowane w Google Sheets
 
-Projekt ma:
-- testy jednostkowe dla modeli, zakresow dat i uslug,
-- testy adapterow storage,
-- lekkie testy integracyjne dla adaptera Jira,
-- testy CLI.
+Aktualizowane sa:
+- spreadsheety przypisane do danego `space` i roku,
+- miesieczne zakladki raw o tytulach `01`, `02`, `03` itd.
 
-Aktualne narzedzia:
-- `pytest`
-- `pytest-cov`
-- `ruff`
-- `mypy`
+Publisher dla kazdej zakladki:
+1. czysci cala zakladke,
+2. zapisuje caly aktualny dataset od `A1`,
+3. naklada formatowanie.
 
-Jakościowe bramki:
-- `ruff check .`
-- `mypy src tests`
-- `pytest` z coverage `>= 90%`
+To znaczy:
+- sync sheets jest idempotentny,
+- nie dopisuje nowych wierszy appendem,
+- zawsze materializuje aktualny stan dla danego miesiaca w danym spreadsheetcie.
 
-## 17. Gdzie szukac zmian
+## 15. Kiedy aktualizowany jest BigQuery
 
-### Jesli zmienia sie logika zakresu dat
+BigQuery jest aktualizowany tylko przez:
+- `jirareport sync bigquery`
 
-Patrz:
-- `domain/time_range.py`
-- testy w `tests/unit/test_time_range.py`
+Ani `daily`, ani `monthly`, ani `backfill`, ani `sync sheets` same z siebie nie laduja danych do BigQuery.
 
-### Jesli zmienia sie format JSON
+## 15.1. `sync bigquery --date`
 
-Patrz:
-- `application/serializers.py`
-- testy use case'ow
+Przy `--date`:
+- system wyznacza `active_months(reference_date)`,
+- czyta Parquety dla tych miesiecy,
+- laduje je do BigQuery,
+- odswieza widoki.
 
-### Jesli zmienia sie logika raportu dziennego lub miesiecznego
+Przyklad:
+- `jirareport sync bigquery --date 2026-03-14`
+- ladowane miesiace:
+  - `2026-02`
+  - `2026-03`
 
-Patrz:
-- `application/services.py`
-- `tests/unit/test_services.py`
+Przyklad dla 1. dnia miesiaca:
+- `jirareport sync bigquery --date 2026-04-01`
+- aktywne miesiace wynikaja z `rolling_window(2026-04-01)`,
+- ladowane miesiace:
+  - `2026-02`
+  - `2026-03`
 
-### Jesli zmienia sie integracja z Jira
+## 15.2. `sync bigquery --from --to`
 
-Patrz:
-- `infrastructure/jira_client.py`
-- `tests/integration/test_jira_client.py`
-- `tests/unit/test_jira_helpers.py`
+Przy jawnym zakresie:
+- system bierze wszystkie miesiace przeciete zakresem,
+- dla kazdego miesiaca czyta odpowiedni Parquet,
+- dla kazdego miesiaca wymienia slice w BigQuery.
 
-### Jesli zmienia sie storage
+Przyklad:
+- `jirareport sync bigquery --from 2025-12-15 --to 2026-02-10`
+- ladowane miesiace:
+  - `2025-12`
+  - `2026-01`
+  - `2026-02`
 
-Patrz:
-- `infrastructure/storage.py`
+## 15.3. Co dokladnie robi load do BigQuery
+
+Dla kazdego `space` i miesiaca:
+1. system czyta `curated/worklogs/space=<slug>/year=YYYY/month=MM/worklogs.parquet`,
+2. usuwa aktualny slice z tabeli dla `space_slug` i `report_month`,
+3. laduje nowy Parquet,
+4. sprawdza duplikaty `worklog_id`,
+5. po zakonczeniu wszystkich miesiecy odswieza widoki.
+
+To znaczy:
+- BigQuery jest aktualizowane na podstawie juz przeliczonych danych,
+- `sync bigquery` jest wtornym krokiem po przeliczeniu danych,
+- brak odpowiedniego Parqueta oznacza, ze najpierw trzeba uruchomic `daily`, `monthly` albo `backfill`.
+
+## 16. Typowy harmonogram operacyjny
+
+Najbardziej logiczny operacyjny przebieg dla danego dnia jest taki:
+
+1. `jirareport daily`
+2. `jirareport sync sheets`
+3. `jirareport sync bigquery`
+
+Znaczenie:
+- `daily` tworzy i odswieza artefakty raportowe,
+- `sync sheets` publikuje aktualny stan operacyjny dla biznesu,
+- `sync bigquery` publikuje aktualny stan analityczny z Parquetow.
+
+Alternatywy:
+- jesli potrzebujesz tylko odswiezyc arkusze, mozesz uruchomic samo `sync sheets`,
+- jesli potrzebujesz tylko zasilic analityke z gotowych Parquetow, mozesz uruchomic samo `sync bigquery`,
+- jesli naprawiasz historie, zwykle najpierw idzie `backfill`, a potem targety zewnetrzne.
+
+## 17. Najczestsze miejsca zmian
+
+Jesli zmieniasz:
+- format JSON -> sprawdz `application/serializers.py`, testy unit i dokumentacje,
+- logike okna dat -> sprawdz `domain/time_range.py`, testy i `PRD.md`,
+- strukture Sheets -> sprawdz `application/spreadsheets.py`, `google/sheets_client.py`, testy i `SHEETS_INTEGRATION.md`,
+- schema Parquet / BigQuery -> sprawdz `parquet_serializers.py`, `bigquery_client.py`, testy i dokumentacje analityczna,
+- konfiguracje spaces -> sprawdz `config/spaces.yaml`, `infrastructure/config.py` i README.
+
+## 18. Testy
+
+Najwazniejsze pliki:
+- `tests/unit/test_cli.py`
+- `tests/unit/test_google_sheets.py`
 - `tests/unit/test_storage.py`
-- `tests/unit/test_storage_helpers.py`
+- `tests/unit/test_services.py`
+- `tests/unit/test_jira_helpers.py`
+- `tests/unit/test_time_range.py`
+- `tests/unit/test_bigquery_client.py`
+- `tests/integration/test_jira_client.py`
 
-### Jesli zmienia sie sposob uruchamiania
+Testy sa oparte glownie na fake adapterach i mockowanych odpowiedziach.
 
-Patrz:
-- `interfaces/cli/app.py`
-- `src/jirareport/main.py`
-- `.github/workflows/`
+## 19. Praktyczne uwagi rozwojowe
 
-## 18. Ważne ograniczenia aktualnej wersji
-
-Obecnie nie ma jeszcze:
-- adaptera Google Sheets,
-- workflow publikacji do Sheets,
-- osobnego mechanizmu delta sync,
-- zaawansowanego cache warstwy API.
-
-To jest swiadomy etap projektu, nie brak przypadkowy.
-
-## 19. Podsumowanie architektoniczne
-
-Najwazniejsze zasady tego kodu:
-
-- logika biznesowa nie zna technologii storage ani HTTP,
-- use case'y operuja na portach,
-- adaptery mapuja swiat zewnetrzny do modeli domenowych,
-- CLI tylko sklada zaleznosci i uruchamia proces,
-- zakresy dat i miesiecy maja osobne obiekty wartosci,
-- testy i quality gates sa traktowane jako czesc implementacji.
-
-Jesli rozwijasz ten projekt, trzymaj ten kierunek:
-- nowe integracje jako adaptery,
-- nowe operacje jako osobne use case'y,
-- nowe formaty jako serializatory lub publishery,
-- bez mieszania warstw i bez wciskania logiki biznesowej do CLI albo klientow HTTP.
+Przed wieksza zmiana sprawdz trzy rzeczy:
+- czy zmiana psuje rozdzielenie per `space`,
+- czy zmiana zachowuje zgodnosc z logika strefy czasowej,
+- czy dokumentacja nadal opisuje implementacje, a nie plan sprzed kilku iteracji.

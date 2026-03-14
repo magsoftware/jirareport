@@ -129,6 +129,7 @@ Coverage gate:
 - [PRD.md](docs/PRD.md)
 - [DEVELOP.md](docs/DEVELOP.md)
 - [SHEETS_INTEGRATION.md](docs/SHEETS_INTEGRATION.md)
+- [BUSINESS_OVERVIEW.md](docs/BUSINESS_OVERVIEW.md)
 
 ## GitHub Actions
 
