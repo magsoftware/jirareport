@@ -9,13 +9,13 @@ from jirareport.infrastructure.config import load_settings
 
 
 @pytest.fixture(autouse=True)
-def clear_google_sheets_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Removes local Google Sheets settings so tests stay environment-independent."""
+def clear_reporting_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Removes local reporting settings so tests stay environment-independent."""
     monkeypatch.setenv("GOOGLE_SHEETS_ENABLED", "")
     monkeypatch.setenv("BIGQUERY_ENABLED", "")
-    monkeypatch.delenv("BIGQUERY_PROJECT_ID", raising=False)
-    monkeypatch.delenv("BIGQUERY_DATASET", raising=False)
-    monkeypatch.delenv("BIGQUERY_TABLE", raising=False)
+    monkeypatch.setenv("BIGQUERY_PROJECT_ID", "")
+    monkeypatch.setenv("BIGQUERY_DATASET", "")
+    monkeypatch.setenv("BIGQUERY_TABLE", "")
     monkeypatch.delenv("JIRA_SPACES_CONFIG_PATH", raising=False)
     for name in tuple(os.environ):
         if name.startswith("GOOGLE_SHEETS_ID_"):
@@ -120,6 +120,7 @@ def test_load_settings_enables_bigquery_when_project_and_dataset_are_configured(
     monkeypatch.setenv("JIRA_API_TOKEN", "secret")
     monkeypatch.setenv("BIGQUERY_PROJECT_ID", "jira-report-489919")
     monkeypatch.setenv("BIGQUERY_DATASET", "jirareport")
+    monkeypatch.delenv("BIGQUERY_TABLE", raising=False)
 
     settings = load_settings()
 
