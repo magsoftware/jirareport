@@ -514,6 +514,7 @@ def _run_daily(
     reference_date = _resolve_reference_date(input_date, settings.timezone_name)
 
     def run_for_space(configured_space: ConfiguredSpace) -> None:
+        """Generates a daily snapshot for one configured Jira space."""
         space = configured_space.space
 
         service = DailySnapshotService(
@@ -565,6 +566,7 @@ def _run_backfill(
     window = _explicit_window(input_from, input_to)
 
     def run_for_space(configured_space: ConfiguredSpace) -> None:
+        """Runs a historical backfill for one configured Jira space."""
         space = configured_space.space
 
         service = BackfillService(
@@ -613,6 +615,7 @@ def _run_monthly(
     month = MonthId.parse(input_month) if input_month else MonthId.from_date(current_date(settings.timezone_name))
 
     def run_for_space(configured_space: ConfiguredSpace) -> None:
+        """Generates an on-demand monthly report for one configured Jira space."""
         space = configured_space.space
 
         service = MonthlyReportService(
@@ -668,6 +671,7 @@ def _run_sync_sheets(
     )
 
     def run_for_space(configured_space: ConfiguredSpace) -> None:
+        """Synchronizes Google Sheets for one configured Jira space."""
         space = configured_space.space
 
         service = SheetsSyncService(
@@ -729,6 +733,7 @@ def _run_sync_bigquery(
     )
 
     def run_for_space(configured_space: ConfiguredSpace) -> None:
+        """Synchronizes BigQuery for one configured Jira space."""
         space = configured_space.space
 
         service = BigQuerySyncService(

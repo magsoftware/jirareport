@@ -145,13 +145,16 @@ class BigQueryWorklogWarehouse:
 
     @property
     def _dataset_ref(self) -> str:
+        """Returns the fully-qualified BigQuery dataset reference."""
         return f"{self._project_id}.{self._dataset}"
 
     @property
     def _table_ref(self) -> str:
+        """Returns the fully-qualified BigQuery table reference."""
         return f"{self._dataset_ref}.{self._table}"
 
     def _default_client_factory(self) -> BigQueryClientProtocol:
+        """Creates a default BigQuery client authenticated with the configured project."""
         return cast(
             BigQueryClientProtocol,
             bigquery.Client(project=self._project_id),
